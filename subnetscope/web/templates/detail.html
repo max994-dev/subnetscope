@@ -1,0 +1,759 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>subnet {{ r.netuid }} - {{ r.name }} · subnetscope</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+</head>
+<body>
+
+  {% macro pct(x) -%}
+    {%- if x is none -%}<span class="vdim">—</span>
+    {%- else -%}{{ "%.2f"|format(x*100) }}%{%- endif -%}
+  {%- endmacro %}
+  {% macro yn(x) -%}
+    {%- if x is none -%}<span class="vdim">—</span>
+    {%- elif x -%}<span class="ok">yes</span>
+    {%- else -%}<span class="danger">no</span>{%- endif -%}
+  {%- endmacro %}
+  {% macro val(x) -%}
+    {%- if x is none -%}<span class="vdim">—</span>
+    {%- else -%}{{ x }}{%- endif -%}
+  {%- endmacro %}
+
+  {% set burn_demand_pct = (r.burn_demand * 100) if r.burn_demand is not none else None %}
+
+  <header class="topbar">
+    <div class="detail-header">
+      <a href="/" class="btn">← back</a>
+      <h1>subnet <span class="net">{{ r.netuid }}</span> — {{ r.name }}</h1>
+      <span class="meta">head {{ head_block }} @ {{ fetched_at }}</span>
+    </div>
+  </header>
+
+  <main class="page">
+
+    <!-- Two-column: main content + sticky right sidebar -->
+    <div class="detail-layout">
+
+      <!-- ══════════ LEFT MAIN ══════════ -->
+      <div class="detail-main">
+
+        <!-- Analysis card (curated or auto) -->
+        {% if analysis %}
+        <section class="card analysis-card">
+          <div class="analysis-head">
+            <div>
+              <h2 style="margin:0;">{{ analysis.title or ("Analysis · subnet " ~ r.netuid) }}</h2>
+              {% if analysis.analyzed_label %}
+              <div class="analysis-meta">{{ analysis.analyzed_label }} · file last updated {{ analysis.file_mtime_iso }}</div>
+              {% else %}
+              <div class="analysis-meta">file last updated {{ analysis.file_mtime_iso }}</div>
+              {% endif %}
+            </div>
+            {% if analysis.is_auto %}
+            <span class="analysis-badge auto">auto · 1h refresh</span>
+            {% else %}
+            <span class="analysis-badge">curated</span>
+            {% endif %}
+          </div>
+          <div class="analysis-prose">
+            {{ analysis.body_html | safe }}
+          </div>
+        </section>
+        {% endif %}
+
+        <section class="card">
+          <h2>Identity</h2>
+          <dl class="kv">
+            <dt>Netuid</dt>      <dd class="mono">{{ r.netuid }}</dd>
+            <dt>Name</dt>        <dd>{{ r.name }}</dd>
+            <dt>Category</dt>    <dd>{{ r.category }}</dd>
+            <dt>GPU need</dt>    <dd>{{ r.gpu_need }}</dd>
+            <dt>Reward shape</dt><dd>{{ r.reward_shape }}</dd>
+            <dt>GitHub</dt>      <dd>{% if r.github_repo %}<a href="{{ r.github_repo }}" target="_blank">{{ r.github_repo }}</a>{% else %}<span class="vdim">—</span>{% endif %}</dd>
+            <dt>URL</dt>         <dd>{% if r.subnet_url %}<a href="{{ r.subnet_url }}" target="_blank">{{ r.subnet_url }}</a>{% else %}<span class="vdim">—</span>{% endif %}</dd>
+            <dt>Discord</dt>     <dd>{% if r.discord %}<a href="{{ r.discord }}" target="_blank">{{ r.discord }}</a>{% else %}<span class="vdim">—</span>{% endif %}</dd>
+          </dl>
+          {% if r.description %}
+          <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
+            <div style="font-size:11px; color:var(--fg-very-dim); text-transform:uppercase; margin-bottom:4px;">Description</div>
+            <p style="margin:0; color:var(--fg-muted);">{{ r.description }}</p>
+          </div>
+          {% endif %}
+        </section>
+
+        <section class="card">
+          <h2>Economics</h2>
+          <dl class="kv">
+            <dt>Reg fee (now)</dt>
+            <dd class="mono {% if r.is_full %}danger{% endif %}">
+              {{ "%.6f"|format(r.burn_tao) }} τ
+              {% if r.is_full %}<span class="full-tag">FULL</span>{% endif %}
+            </dd>
+            <dt>Fee min / max</dt>
+            <dd class="mono">{{ "%.6f"|format(r.min_burn_tao) }} τ → {{ "%.4f"|format(r.max_burn_tao) }} τ</dd>
+            <dt>Reg demand</dt>
+            <dd class="mono">
+              {% if burn_demand_pct is not none %}
+                {% set bar_filled = (burn_demand_pct / 5)|round(0, "floor")|int %}
+                [{% for i in range(20) %}{% if i < bar_filled %}█{% else %}░{% endif %}{% endfor %}]
+                {{ "%.1f"|format(burn_demand_pct) }}% of max
+              {% else %}<span class="vdim">—</span>{% endif %}
+            </dd>
+            <dt>Burn reg</dt>    <dd>{{ yn(r.burn_registration_allowed) }}</dd>
+            <dt>PoW reg</dt>     <dd>{{ yn(r.pow_registration_allowed) }}</dd>
+            <dt>PoW difficulty</dt><dd class="mono">{{ val(r.difficulty) }}</dd>
+            <dt>UID slots</dt>
+            <dd class="mono {% if r.is_full %}danger{% endif %}">
+              {{ r.subnetwork_n }} / {{ r.max_n }}
+              <span class="vdim">({{ r.slots_free }} free)</span>
+            </dd>
+            <dt>Validator max</dt><dd class="mono">{{ val(r.max_validators) }}</dd>
+            <dt>Pool TAO</dt>    <dd class="mono">{{ "{:,.4f}".format(r.tao_in) }} τ</dd>
+            <dt>Pool α</dt>      <dd class="mono">{{ "{:,.4f}".format(r.alpha_in) }}</dd>
+            <dt>Price</dt>       <dd class="mono">{{ "%.6f"|format(r.price) }} τ/α</dd>
+            <dt>Emission/day</dt><dd class="mono ok">{{ "{:,.4f}".format(r.emission_per_day) }} τ</dd>
+            <dt>Emission/block</dt><dd class="mono">{{ "%.6f"|format(r.emission_per_block) }} τ</dd>
+            <dt>Age</dt>         <dd class="mono">{{ "%.1f"|format(r.age_days) }} days</dd>
+          </dl>
+        </section>
+
+        <section class="card">
+          <h2>Reward distribution</h2>
+          <dl class="kv">
+            <dt>Shape</dt>        <dd>{{ r.reward_shape }}</dd>
+            <dt>Active miners</dt><dd class="mono">{{ val(r.active_miners) }}</dd>
+            <dt>Top-1 share</dt>  <dd class="mono">{{ pct(r.top1_share) }}</dd>
+            <dt>Top-5 share</dt>  <dd class="mono">{{ pct(r.top5_share) }}</dd>
+            <dt>Top-10 share</dt> <dd class="mono">{{ pct(r.top10_share) }}</dd>
+            <dt>Top-50 share</dt> <dd class="mono">{{ pct(r.top50_share) }}</dd>
+            <dt>Gini</dt>
+            <dd class="mono">
+              {% if r.incentive_gini is none %}<span class="vdim">—</span>
+              {% else %}{{ "%.3f"|format(r.incentive_gini) }}
+                <span class="vdim" style="font-size:11px;">&nbsp;0 = equal · 1 = winner-takes-all</span>
+              {% endif %}
+            </dd>
+          </dl>
+        </section>
+
+        {% if emission_split %}
+        <section class="card emission-split-card">
+          <h2>
+            Emission split
+            <span class="emission-split-sub vdim">
+              of {{ "%.2f"|format(emission_split.emission_per_day_tao) }} τ/day
+              · owner-cut from chain ({{ emission_split.owner_cut_source }})
+            </span>
+          </h2>
+
+          <div class="esp-bar" title="owner {{ emission_split.owner_pct }}% · validators {{ emission_split.validators_pct }}% · miners {{ emission_split.miners_pct }}%">
+            <span class="esp-seg esp-owner"
+                  style="width: {{ emission_split.owner_pct }}%;"
+                  data-label="owner"></span>
+            <span class="esp-seg esp-validators"
+                  style="width: {{ emission_split.validators_pct }}%;"
+                  data-label="validators"></span>
+            <span class="esp-seg esp-miners"
+                  style="width: {{ emission_split.miners_pct }}%;"
+                  data-label="miners"></span>
+          </div>
+
+          <table class="esp-table">
+            <thead>
+              <tr><th>Bucket</th><th class="num">Share</th><th class="num">τ / day</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="esp-dot esp-dot-owner"></span> Owner</td>
+                <td class="num mono">{{ "%.2f"|format(emission_split.owner_pct) }}%</td>
+                <td class="num mono">{{ "%.4f"|format(emission_split.owner_tao_day) }}</td>
+              </tr>
+              <tr>
+                <td><span class="esp-dot esp-dot-validators"></span> Validators</td>
+                <td class="num mono">{{ "%.2f"|format(emission_split.validators_pct) }}%</td>
+                <td class="num mono">{{ "%.4f"|format(emission_split.validators_tao_day) }}</td>
+              </tr>
+              <tr>
+                <td><span class="esp-dot esp-dot-miners"></span> Miners</td>
+                <td class="num mono">{{ "%.2f"|format(emission_split.miners_pct) }}%</td>
+                <td class="num mono">{{ "%.4f"|format(emission_split.miners_tao_day) }}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="esp-foot vdim">
+            owner&nbsp;= SubnetOwnerCut / 65535 ({{ emission_split.owner_cut_u16 }}/65535)
+            · validators&nbsp;= (1−owner)&nbsp;·&nbsp;κ ({{ emission_split.kappa_u16 }}/65535 = {{ "%.2f"|format(emission_split.kappa_pct) }}%)
+            · miners&nbsp;= remainder
+          </div>
+        </section>
+        {% endif %}
+
+        {% if miner_dist and not miner_dist.error %}
+        {% set s = miner_dist.summary %}
+        <section class="card mrd-card">
+          <h2>
+            Miner reward distribution
+            <span class="mrd-sub vdim">
+              within the miner bucket
+              {% if s.total_miner_tao_per_day %}
+                · {{ "%.2f"|format(s.total_miner_tao_per_day) }} τ/day total
+              {% endif %}
+              {% if miner_dist.age_seconds is not none %}
+                · {{ "%.0f"|format(miner_dist.age_seconds) }}s ago
+              {% endif %}
+            </span>
+          </h2>
+
+          <div class="mrd-stats">
+            <div class="mrd-stat">
+              <span class="mrd-stat-label">Active miners</span>
+              <span class="mrd-stat-val mono">{{ s.active_miner_uids }} / {{ s.total_miner_uids }}</span>
+            </div>
+            <div class="mrd-stat">
+              <span class="mrd-stat-label">Top-1 share</span>
+              <span class="mrd-stat-val mono">{{ "%.1f"|format(s.top1_pct) }}%</span>
+            </div>
+            <div class="mrd-stat">
+              <span class="mrd-stat-label">Top-5 share</span>
+              <span class="mrd-stat-val mono">{{ "%.1f"|format(s.top5_pct) }}%</span>
+            </div>
+            <div class="mrd-stat">
+              <span class="mrd-stat-label">Top-10 share</span>
+              <span class="mrd-stat-val mono">{{ "%.1f"|format(s.top10_pct) }}%</span>
+            </div>
+            <div class="mrd-stat">
+              <span class="mrd-stat-label">Top-50 share</span>
+              <span class="mrd-stat-val mono">{{ "%.1f"|format(s.top50_pct) }}%</span>
+            </div>
+          </div>
+
+          {% if miner_dist.miners %}
+          <div class="mrd-table-wrap">
+            <table class="mrd-table">
+              <thead>
+                <tr>
+                  <th class="num">#</th>
+                  <th class="num">UID</th>
+                  <th>Hotkey</th>
+                  <th class="num">Incentive</th>
+                  <th class="num">α / day</th>
+                  <th class="num">τ / day</th>
+                  <th class="mrd-share-col">Share of miner pool</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for m in miner_dist.miners %}
+                {# Bar width is share normalized to top-1 so the leader fills the column. #}
+                {% set norm = (m.share_pct / s.top1_pct * 100.0) if s.top1_pct > 0 else 0 %}
+                <tr>
+                  <td class="num mono mrd-rank">{{ m.rank_pos }}</td>
+                  <td class="num mono">{{ m.uid }}</td>
+                  <td class="mono mrd-hotkey" title="{{ m.hotkey }}">{{ m.hotkey_short }}</td>
+                  <td class="num mono">{{ "%.4f"|format(m.incentive) }}</td>
+                  <td class="num mono">{{ "%.3f"|format(m.alpha_per_day) }}</td>
+                  <td class="num mono ok">{{ "%.4f"|format(m.tao_per_day) }}</td>
+                  <td class="mrd-share-cell">
+                    <div class="mrd-bar">
+                      <span class="mrd-bar-fill" style="width: {{ "%.2f"|format(norm) }}%;"></span>
+                      <span class="mrd-bar-label mono">{{ "%.2f"|format(m.share_pct) }}%</span>
+                    </div>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <div class="mrd-foot vdim">
+            Showing top {{ miner_dist.miners_returned }} of {{ s.total_miner_uids }} miner UIDs · ranked by paid α/block · refreshed every 5 min
+          </div>
+          {% else %}
+          <p class="vdim">No miner emissions in current epoch (subnet may be too new or fully validator-only).</p>
+          {% endif %}
+        </section>
+        {% elif miner_dist and miner_dist.error %}
+        <section class="card mrd-card" id="mrd-card-loading" data-netuid="{{ r.netuid }}">
+          <h2>Miner reward distribution</h2>
+          {% if miner_dist.error == "loading" %}
+          <p class="vdim mrd-loading">
+            <span class="mrd-spinner"></span>
+            Loading miner data from chain (cold-start ≈ 30 s)…
+            <span class="mrd-poll-status vdim"></span>
+          </p>
+          <script>
+          (function () {
+            "use strict";
+            var card = document.getElementById("mrd-card-loading");
+            if (!card) return;
+            var netuid = card.dataset.netuid;
+            var status = card.querySelector(".mrd-poll-status");
+            var tries = 0;
+            function poll() {
+              tries++;
+              if (status) status.textContent = " (try " + tries + ")";
+              fetch("/api/miner-rewards/" + netuid + "?limit=30")
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                  if (d && !d.error && d.miners && d.miners.length) {
+                    location.reload();
+                  } else if (tries < 8) {
+                    setTimeout(poll, 4000);
+                  } else if (status) {
+                    status.textContent = " (gave up — refresh manually)";
+                  }
+                })
+                .catch(function () {
+                  if (tries < 8) setTimeout(poll, 4000);
+                });
+            }
+            setTimeout(poll, 2000);
+          })();
+          </script>
+          {% else %}
+          <p class="vdim">Couldn't load: {{ miner_dist.error }}</p>
+          {% endif %}
+        </section>
+        {% endif %}
+
+        <section class="card">
+          <h2>Hyperparameters (chain)</h2>
+          <dl class="kv kv-2col">
+            <dt>rho</dt>              <dd class="mono">{{ val(r.rho) }}</dd>
+            <dt>kappa</dt>            <dd class="mono">{% if r.kappa %}{{ r.kappa }} <span class="vdim">({{ "%.1f"|format(r.kappa / 65535 * 100) }}%)</span>{% else %}<span class="vdim">—</span>{% endif %}</dd>
+            <dt>alpha_high</dt>       <dd class="mono">{{ val(r.alpha_high) }}</dd>
+            <dt>alpha_low</dt>        <dd class="mono">{{ val(r.alpha_low) }}</dd>
+            <dt>sigmoid_steepness</dt><dd class="mono">{{ val(r.alpha_sigmoid_steepness) }}</dd>
+            <dt>liquid_alpha</dt>     <dd>{{ yn(r.liquid_alpha_enabled) }}</dd>
+            <dt>immunity_period</dt>  <dd class="mono">{{ val(r.immunity_period) }} blocks</dd>
+            <dt>tempo</dt>            <dd class="mono">{{ val(r.tempo) }} blocks/cycle</dd>
+            <dt>yuma_version</dt>     <dd class="mono">{{ val(r.yuma_version) }}</dd>
+            <dt>commit_reveal</dt>    <dd>{{ yn(r.commit_reveal_enabled) }}</dd>
+            <dt>weights_rate_limit</dt><dd class="mono">{{ val(r.weights_rate_limit) }}</dd>
+          </dl>
+        </section>
+
+      </div><!-- /detail-main -->
+
+      <!-- ══════════ RIGHT SIDEBAR ══════════ -->
+      <aside class="detail-sidebar">
+
+        <!-- 1. Burn fee live chart — top of sidebar -->
+        <section class="card burn-chart-card">
+          <div class="burn-chart-header">
+            <div class="burn-chart-title-group">
+              <h2 style="margin:0; font-size:14px;">Reg Fee</h2>
+              <span class="burn-live-badge" id="burn-live-badge">● LIVE</span>
+            </div>
+            <div class="burn-chart-meta">
+              <span class="burn-live-now mono" id="burn-live-now">—</span>
+              <span class="burn-live-age vdim" id="burn-live-age"></span>
+            </div>
+          </div>
+          <div class="burn-chart-wrap">
+            <canvas id="burn-chart"></canvas>
+            <div class="burn-tooltip" id="burn-tooltip"></div>
+          </div>
+          <div class="burn-chart-foot vdim">
+            Hover for exact value · updates every 12 s
+          </div>
+        </section>
+
+        <!-- 2. Quick stats bar -->
+        <section class="card">
+          <h2 style="margin-bottom:10px;">At a glance</h2>
+          <div class="quick-stats">
+            <div class="qs-item {% if r.is_full %}qs-danger{% endif %}">
+              <span class="qs-label">Slots free</span>
+              <span class="qs-val">{{ r.slots_free }} / {{ r.max_n }}</span>
+            </div>
+            <div class="qs-item">
+              <span class="qs-label">Miners active</span>
+              <span class="qs-val">{{ val(r.active_miners) }}</span>
+            </div>
+            <div class="qs-item">
+              <span class="qs-label">Price</span>
+              <span class="qs-val mono">{{ "%.5f"|format(r.price) }} τ</span>
+            </div>
+            <div class="qs-item">
+              <span class="qs-label">Emission/day</span>
+              <span class="qs-val ok mono">{{ "{:,.2f}".format(r.emission_per_day) }} τ</span>
+            </div>
+            <div class="qs-item">
+              <span class="qs-label">Top-1 share</span>
+              <span class="qs-val mono">{{ pct(r.top1_share) }}</span>
+            </div>
+            <div class="qs-item">
+              <span class="qs-label">Pool liquidity</span>
+              <span class="qs-val mono">{{ "{:,.0f}".format(r.tao_in) }} τ</span>
+            </div>
+          </div>
+        </section>
+
+        {% if watch_hotkeys %}
+        <section class="card watch-hk-card">
+          <h2 style="margin-bottom:8px;">Your hotkeys</h2>
+          <p class="vdim watch-hk-hint">
+            On-chain registration on subnet <span class="mono">{{ r.netuid }}</span>
+            · emission rank vs peers (same metagraph as miner table below)
+            · from <code>hotkeys.entries</code> in config
+          </p>
+          <ul class="watch-hk-list">
+            {% for w in watch_hotkeys %}
+            <li class="watch-hk-row">
+              <div class="watch-hk-top">
+                {% if w.name %}<span class="watch-hk-name">{{ w.name }}</span>{% endif %}
+                <span class="mono watch-hk-addr" title="{{ w.ss58 }}">{{ w.hotkey_short }}</span>
+              </div>
+              {% if w.error %}
+              <div class="watch-hk-status danger">{{ w.error }}</div>
+              {% elif w.registered %}
+              <div class="watch-hk-status"><span class="ok">registered</span>
+                <span class="vdim">·</span> UID <span class="mono">{{ w.uid }}</span>
+              </div>
+              {% else %}
+              <div class="watch-hk-status vdim">not registered on this subnet</div>
+              {% endif %}
+              {% if w.registered and w.metrics %}
+              {% set m = w.metrics %}
+              <dl class="watch-hk-metrics">
+                <dt>Role</dt>
+                <dd>{% if m.role == "validator" %}<span class="warn">validator</span>{% else %}miner{% endif %}</dd>
+                <dt>Emission rank</dt>
+                <dd class="mono">#{{ m.rank_pos }} / {{ m.pool_size }}</dd>
+                <dt>Rank score</dt>
+                <dd class="mono" title="100 = top of pool by α/block, 0 = bottom">{{ "%.0f"|format(m.rank_percentile) }} / 100</dd>
+                <dt>Pool share</dt>
+                <dd class="mono">{{ "%.3f"|format(m.share_pct) }}%</dd>
+                <dt>τ / day</dt>
+                <dd class="mono ok">{{ "%.4f"|format(m.tao_per_day) }}</dd>
+                <dt>Incentive</dt>
+                <dd class="mono">{{ "%.4f"|format(m.incentive) }}</dd>
+                <dt>Trust</dt>
+                <dd class="mono">{{ "%.4f"|format(m.trust) }}</dd>
+                <dt>Chain rank</dt>
+                <dd class="mono">{{ "%.4f"|format(m.rank) }}</dd>
+              </dl>
+              {% elif w.registered and w.metrics_error %}
+              <div class="watch-hk-metrics-msg vdim">{{ w.metrics_error }}</div>
+              {% endif %}
+              {% if w.note %}<div class="watch-hk-note vdim">{{ w.note }}</div>{% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+        </section>
+        {% endif %}
+
+        <!-- 3. Easy-entry score -->
+        <section class="card">
+          <h2>Easy-entry score</h2>
+          {% if score_breakdown %}
+          <div class="score-hero">
+            <span class="score-big mono">{{ "%.0f"|format(score_breakdown.score) }}</span>
+            <span class="vdim score-denom">/ 100</span>
+            <div class="score-bar" style="flex:1; height:8px;">
+              <span class="score-fill" style="width:{{ score_breakdown.score }}%"></span>
+            </div>
+          </div>
+          {% if score_breakdown.why %}
+          <ul class="score-why">
+            {% for w in score_breakdown.why %}<li>{{ w }}</li>{% endfor %}
+          </ul>
+          {% endif %}
+          <dl class="kv kv-compact">
+            <dt>GPU friction</dt>  <dd class="mono">{{ "%.2f"|format(score_breakdown.gpu) }}</dd>
+            <dt>Top-1</dt>        <dd class="mono">{{ "%.2f"|format(score_breakdown.top1) }}</dd>
+            <dt>Miners</dt>       <dd class="mono">{{ "%.2f"|format(score_breakdown.miners) }}</dd>
+            <dt>Slots free</dt>   <dd class="mono">{{ "%.2f"|format(score_breakdown.slots) }}</dd>
+            <dt>Burn fee</dt>     <dd class="mono">{{ "%.2f"|format(score_breakdown.fee) }}</dd>
+            <dt>Liquidity</dt>    <dd class="mono">{{ "%.2f"|format(score_breakdown.liquidity) }}</dd>
+            <dt>Emission</dt>     <dd class="mono">{{ "%.2f"|format(score_breakdown.emission) }}</dd>
+          </dl>
+          {% else %}
+          <p class="vdim">Score not yet computed.</p>
+          {% endif %}
+        </section>
+
+        <!-- 4. 24h sparklines -->
+        <section class="card">
+          <h2>24h trends</h2>
+          <div class="sidebar-sparks">
+            <div class="spark-item">
+              <div class="spark-label">price <span class="spark-now mono" id="now-price">—</span></div>
+              <canvas id="spark-price" class="spark-canvas"></canvas>
+            </div>
+            <div class="spark-item">
+              <div class="spark-label">emission/day <span class="spark-now mono" id="now-emission">—</span></div>
+              <canvas id="spark-emission" class="spark-canvas"></canvas>
+            </div>
+            <div class="spark-item">
+              <div class="spark-label">top-1 share <span class="spark-now mono" id="now-top1">—</span></div>
+              <canvas id="spark-top1" class="spark-canvas"></canvas>
+            </div>
+            <div class="spark-item">
+              <div class="spark-label">miners active <span class="spark-now mono" id="now-miners">—</span></div>
+              <canvas id="spark-miners" class="spark-canvas"></canvas>
+            </div>
+            <div class="spark-item">
+              <div class="spark-label">UID slots used <span class="spark-now mono" id="now-slots">—</span></div>
+              <canvas id="spark-slots" class="spark-canvas"></canvas>
+            </div>
+          </div>
+          <div class="vdim" style="font-size:10px; margin-top:6px;">Snapshots every ~2 min. Empty = not enough data yet.</div>
+        </section>
+
+      </aside><!-- /detail-sidebar -->
+
+    </div><!-- /detail-layout -->
+
+  </main>
+
+  <footer class="footnote">subnet {{ r.netuid }} · live data from chain at block {{ head_block }}</footer>
+
+  <script src="/static/app.js?v={{ asset_v }}"></script>
+  <script>
+  /* ═══ Burn-fee live chart + sparklines ═══ */
+  (function () {
+    "use strict";
+    var netuid = {{ r.netuid }};
+
+    /* ── format helpers ── */
+    function fmtBurn(v) {
+      if (v == null) return "—";
+      if (v >= 1)    return v.toFixed(4) + " τ";
+      if (v >= 0.01) return v.toFixed(5) + " τ";
+      return v.toFixed(6) + " τ";
+    }
+    function fmtTime(ts) {
+      return new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+    function fmtFull(ts) {
+      return new Date(ts * 1000).toLocaleTimeString();
+    }
+
+    /* ── chart state ── */
+    var burnPts  = [];
+    var hoverIdx = -1;
+    var animId   = null;
+    var COLOR    = "#f87171";
+    var PAD      = { l: 58, r: 12, t: 18, b: 28 };
+
+    var canvas  = document.getElementById("burn-chart");
+    var tooltip = document.getElementById("burn-tooltip");
+    var nowEl   = document.getElementById("burn-live-now");
+    var ageEl   = document.getElementById("burn-live-age");
+
+    function fmtLabel(v) {
+      if (v >= 1)    return v.toFixed(3);
+      if (v >= 0.01) return v.toFixed(4);
+      return v.toFixed(5);
+    }
+
+    /* ── draw ── */
+    function drawChart() {
+      if (!canvas) return;
+      var ctx = canvas.getContext("2d");
+      var dpr = window.devicePixelRatio || 1;
+      var w = canvas.clientWidth, h = canvas.clientHeight;
+      if (w === 0 || h === 0) { scheduleAnim(); return; }
+      canvas.width  = w * dpr;
+      canvas.height = h * dpr;
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, w, h);
+
+      if (burnPts.length < 2) {
+        ctx.fillStyle = "rgba(255,255,255,0.16)";
+        ctx.font = "12px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("Waiting for data…", w / 2, h / 2);
+        scheduleAnim(); return;
+      }
+
+      var pts  = burnPts;
+      var vals = pts.map(function(p) { return p.v; });
+      var minV = Math.min.apply(null, vals);
+      var maxV = Math.max.apply(null, vals);
+      var rng  = maxV - minV;
+      if (rng === 0) { minV -= 0.000001; maxV += 0.000001; rng = maxV - minV; }
+      var pv   = rng * 0.10;
+      minV -= pv * 0.4; maxV += pv; rng = maxV - minV;
+
+      var cw = w - PAD.l - PAD.r, ch = h - PAD.t - PAD.b, n = pts.length;
+      function px(i) { return PAD.l + (i / (n - 1)) * cw; }
+      function py(v)  { return PAD.t + (1 - (v - minV) / rng) * ch; }
+
+      /* Y grid + labels */
+      for (var s = 0; s <= 4; s++) {
+        var gv = minV + (s / 4) * rng, gy = py(gv);
+        ctx.beginPath(); ctx.moveTo(PAD.l, gy); ctx.lineTo(w - PAD.r, gy);
+        ctx.strokeStyle = "rgba(255,255,255,0.05)"; ctx.lineWidth = 1; ctx.stroke();
+        ctx.fillStyle = "rgba(255,255,255,0.3)"; ctx.font = "9px monospace";
+        ctx.textAlign = "right";
+        ctx.fillText(fmtLabel(gv), PAD.l - 4, gy + 3);
+      }
+
+      /* X labels */
+      var xN = Math.min(5, n);
+      var xS = Math.max(1, Math.floor((n - 1) / (xN - 1)));
+      ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.font = "9px monospace"; ctx.textAlign = "center";
+      var drawnX = {};
+      for (var li = 0; li < n; li += xS) {
+        var lx = Math.round(px(li));
+        if (!drawnX[lx]) { ctx.fillText(fmtTime(pts[li].t), lx, h - PAD.b + 13); drawnX[lx] = 1; }
+      }
+      var lastX = Math.round(px(n - 1));
+      if (!drawnX[lastX]) ctx.fillText(fmtTime(pts[n-1].t), lastX, h - PAD.b + 13);
+
+      /* area */
+      var grad = ctx.createLinearGradient(0, PAD.t, 0, PAD.t + ch);
+      grad.addColorStop(0, COLOR + "55"); grad.addColorStop(1, COLOR + "00");
+      ctx.beginPath();
+      ctx.moveTo(px(0), PAD.t + ch);
+      for (var i = 0; i < n; i++) ctx.lineTo(px(i), py(pts[i].v));
+      ctx.lineTo(px(n - 1), PAD.t + ch);
+      ctx.closePath(); ctx.fillStyle = grad; ctx.fill();
+
+      /* line */
+      ctx.beginPath(); ctx.moveTo(px(0), py(pts[0].v));
+      for (var j = 1; j < n; j++) ctx.lineTo(px(j), py(pts[j].v));
+      ctx.strokeStyle = COLOR; ctx.lineWidth = 1.8; ctx.lineJoin = "round"; ctx.lineCap = "round"; ctx.stroke();
+
+      /* hover crosshair + dot */
+      if (hoverIdx >= 0 && hoverIdx < n) {
+        var hx = px(hoverIdx), hy = py(pts[hoverIdx].v);
+        ctx.save(); ctx.setLineDash([3, 3]);
+        ctx.beginPath(); ctx.moveTo(hx, PAD.t); ctx.lineTo(hx, PAD.t + ch);
+        ctx.strokeStyle = "rgba(255,255,255,0.2)"; ctx.lineWidth = 1; ctx.stroke();
+        ctx.restore();
+        ctx.beginPath(); ctx.arc(hx, hy, 4.5, 0, Math.PI * 2);
+        ctx.fillStyle = COLOR; ctx.fill();
+        ctx.strokeStyle = "#0f1117"; ctx.lineWidth = 1.8; ctx.stroke();
+      }
+
+      /* live pulsing dot */
+      if (hoverIdx < 0 || hoverIdx === n - 1) {
+        var t2  = Date.now() / 1000;
+        var p2  = 0.45 + 0.55 * Math.sin(t2 * Math.PI * 1.6);
+        var lx2 = px(n - 1), ly2 = py(pts[n - 1].v);
+        ctx.beginPath(); ctx.arc(lx2, ly2, 8 * p2, 0, Math.PI * 2);
+        var al  = Math.round(0x10 + 0x28 * p2).toString(16).padStart(2, "0");
+        ctx.fillStyle = COLOR + al; ctx.fill();
+        ctx.beginPath(); ctx.arc(lx2, ly2, 3, 0, Math.PI * 2);
+        ctx.fillStyle = COLOR; ctx.fill();
+      }
+
+      scheduleAnim();
+    }
+
+    function scheduleAnim() {
+      if (animId) cancelAnimationFrame(animId);
+      animId = requestAnimationFrame(drawChart);
+    }
+
+    /* ── mouse ── */
+    if (canvas) {
+      canvas.addEventListener("mousemove", function(e) {
+        if (!burnPts.length) return;
+        var rect = canvas.getBoundingClientRect();
+        var x    = e.clientX - rect.left - PAD.l;
+        var cw2  = rect.width - PAD.l - PAD.r;
+        var i    = Math.round((x / cw2) * (burnPts.length - 1));
+        i = Math.max(0, Math.min(burnPts.length - 1, i));
+        hoverIdx = i;
+        if (tooltip) {
+          var pt = burnPts[i];
+          tooltip.innerHTML =
+            '<span class="tt-time">' + fmtFull(pt.t) + '</span>' +
+            '<span class="tt-sep">·</span>' +
+            '<span class="tt-val">' + fmtBurn(pt.v) + '</span>';
+          var tipL = Math.min(e.clientX - rect.left + 10, rect.width - 185);
+          tooltip.style.left = tipL + "px";
+          tooltip.style.display = "flex";
+        }
+      });
+      canvas.addEventListener("mouseleave", function() {
+        hoverIdx = -1;
+        if (tooltip) tooltip.style.display = "none";
+      });
+    }
+
+    /* ── live polling ── */
+    var lastLiveV = null, lastLiveTs = null;
+
+    function pollLive() {
+      fetch("/api/burn-live/" + netuid)
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(d) {
+          if (!d) return;
+          var v = d.burn_tao, ts = d.ts;
+          if (nowEl) nowEl.textContent = fmtBurn(v);
+          if (ageEl) {
+            var ago = Math.round(Date.now() / 1000 - ts);
+            ageEl.textContent = ago < 60 ? ago + "s ago" : Math.round(ago / 60) + "m ago";
+          }
+          if (lastLiveTs !== ts) {
+            lastLiveTs = ts;
+            var isNew  = lastLiveV !== v;
+            lastLiveV  = v;
+            if (burnPts.length === 0 || isNew) {
+              burnPts.push({ t: ts, v: v });
+              if (burnPts.length > 300) burnPts = burnPts.slice(-300);
+            } else {
+              burnPts[burnPts.length - 1].t = ts;
+            }
+          }
+        }).catch(function() {});
+    }
+
+    /* ── history + sparklines ── */
+    function loadHistory() {
+      fetch("/api/history/" + netuid + "?hours=24")
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(d) {
+          if (!d || !d.points) return;
+          var raw = d.points;
+
+          var hist = raw.filter(function(p) { return p.burn_tao != null; })
+                       .map(function(p) { return { t: p.ts, v: p.burn_tao }; });
+          if (hist.length) burnPts = hist;
+
+          function series(field, mul) {
+            mul = mul || 1;
+            return raw.filter(function(p) { return p[field] != null; })
+                      .map(function(p) { return { t: p.ts, v: p[field] * mul }; });
+          }
+          var price  = series("price_tao_per_alpha");
+          var emi    = series("emission_per_day");
+          var top1   = series("top1_share", 100);
+          var miners = series("active_miners");
+          var slots  = series("subnetwork_n");
+
+          function setNow(id, val, fmt) {
+            var el = document.getElementById(id);
+            if (el && val != null) el.textContent = fmt(val);
+          }
+          if (price.length)  setNow("now-price",    price[price.length-1].v,   function(v){return v.toFixed(5);});
+          if (emi.length)    setNow("now-emission",  emi[emi.length-1].v,       function(v){return v.toFixed(1);});
+          if (top1.length)   setNow("now-top1",      top1[top1.length-1].v,     function(v){return v.toFixed(1)+"%";});
+          if (miners.length) setNow("now-miners",    miners[miners.length-1].v, function(v){return String(v);});
+          if (slots.length)  setNow("now-slots",     slots[slots.length-1].v,   function(v){return String(v);});
+
+          window.snDrawSparkline("spark-price",    price,  "#22d3ee");
+          window.snDrawSparkline("spark-emission", emi,    "#34d399");
+          window.snDrawSparkline("spark-top1",     top1,   "#fbbf24");
+          window.snDrawSparkline("spark-miners",   miners, "#a5b4fc");
+          window.snDrawSparkline("spark-slots",    slots,  "#67e8f9");
+        }).catch(function() {});
+    }
+
+    loadHistory();
+    pollLive();
+    setInterval(pollLive, 12000);
+    drawChart();
+  })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,116 @@
+# ============================================================================
+# subnetscope — Bittensor subnet directory & inspector (read-only)
+# ============================================================================
+
+network:
+  subtensor_endpoint: "wss://entrypoint-finney.opentensor.ai:443"
+  # Optional Taostats API key. Improves name/description coverage from ~40% to ~95%.
+  # Same key as alphapilot — leave blank to skip enrichment and use on-chain only.
+  taostats_api_key: ""
+
+universe:
+  # Hard exclude list (netuid integers).
+  blacklist_netuids: []
+  # If non-empty, only these netuids are scanned. Leave [] to scan ALL subnets.
+  whitelist_netuids: []
+  # Skip the root subnet (netuid 0) since it's not a normal pool.
+  include_root: false
+
+scan:
+  # Max parallel SDK reads (each call is a websocket round-trip).
+  concurrency: 8
+  # Time between full refreshes in TUI mode (seconds).
+  refresh_seconds: 90
+  # If a subnet read fails, retry this many times then move on.
+  retries_per_subnet: 2
+
+categorize:
+  # If true, manual overrides in `subnetscope/categories.json` win over keywords.
+  use_overrides: true
+  # If a subnet has no clean match, label it as this category.
+  default_category: "other"
+
+dashboard:
+  # Default sort. Single key OR comma-separated multi-key spec with optional
+  # :asc / :desc per key. Available keys:
+  #   netuid, fee (alias: burn), demand, name, type, gpu, reward,
+  #   top1, miners, gini, emission, liquidity, age,
+  #   slots_used, slots_free, fullness (= used/max), price.
+  #
+  # Default below is tuned for "find the best subnet to mine on":
+  #   1. lowest GPU need first (none > heavy)
+  #   2. flattest reward distribution first (more chance to earn)
+  #   3. most free UID slots first (less competition)
+  #   4. cheapest burn fee first
+  #   5. highest liquidity first (more stable AMM pool)
+  #   6. highest emission first (more rewards)
+  sort_by: "gpu:asc, reward:asc, slots_free:desc, fee:asc, liquidity:desc, emission:desc"
+  # Default direction for keys without an explicit :asc/:desc suffix above.
+  sort_order: "asc"
+  # Filter to only these categories (empty = show all).
+  filter_types: []
+  # Truncate descriptions to this many chars in the table.
+  max_description_chars: 50
+
+coldkeys:
+  # READ-ONLY wallet directory for the dashboard "Wallet" modal.
+  # Subnetscope NEVER reads private keys, mnemonics, or passwords.
+  # Only the public SS58 address is queried (free TAO + per-subnet alpha
+  # stake positions). It's safe to share this section.
+  #
+  # Tip: get a wallet's SS58 with:
+  #   cat ~/.bittensor/wallets/<wallet_name>/coldkeypub.txt
+  #
+  # Cache TTL — how long balance/stake snapshots are reused before re-querying
+  # the chain (one round-trip per refresh per coldkey).
+  cache_ttl_seconds: 60
+  # If true, the modal lets you paste any SS58 (handy for one-off lookups).
+  # Set to false to restrict to the curated `entries` list below.
+  allow_adhoc_lookup: true
+  entries: 
+  # Example entries — uncomment + replace with your own SS58s:
+    - name: "ghostar"
+      ss58: "5DkNFrYpD921PzE8uwqPsuZUovKk6ufmqDg7NoMyrj3ZbRCZ"
+      note: "primary cold storage"
+  #   - name: "ghostar"
+  #     ss58: "5Gxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+hotkeys:
+  # Optional: miner/validator hotkey SS58s to highlight on each SUBNET DETAIL page.
+  # Shows registration + UID, then emission rank vs miners or validators (paid α/block),
+  # pool share %, τ/day, incentive, trust — same basis as the "Miner reward distribution" table.
+  # Tip: cat ~/.bittensor/wallets/<wallet>/hotkeys/<hk>/hotkeypub.txt
+  # Example:
+  entries:
+    - name: "hot331"
+      ss58: "5DhWWy9sd98tk6nXtA3ev1SWQAh3SeWdkzwmCVkuqgDaf8Wm"
+      note: "SN33 miner"
+      entries:
+    - name: "hot332"
+      ss58: "5DXXvse5v3ivnKcgxLrXUQ5LsxcB9xwyE9yjYN4SoNd9eZME"
+      note: "SN33 miner"
+    - name: "hot333"
+      ss58: "5C5r9f67KWthNKMSsySiVgZ6TDdHyve7DCXRRwTmjM3EwoAW"
+      note: "SN33 miner"
+    - name: "hot334"
+      ss58: "5GePDiyBWxZK9gmJYon6qKsgtGppXt9gDdc6PzFQs2zoJA8p"
+      note: "SN33 miner"
+    - name: "hot335"
+      ss58: "5HgG7WLrXmGZrCWnwXttjrdsWmBjaCdPxv8P2uaaMN89ZqDY"
+      note: "SN33 miner"
+    - name: "hot336"
+      ss58: "5FH1XFEA95maEerdEs8zseL4DLx9S3QcwtL7H6XXa7zQtp9s"
+      note: "SN33 miner"
+    - name: "hot337"
+      ss58: "5CGG2zZDXqeTvu26G2MA5kiozU6Qo5jisHWQTzbqUXnmgabH"
+      note: "SN33 miner"
+    - name: "hot338"
+      ss58: "5E1kSKmTAfvioXyqcc6uss541duMh2dU3nw3CsfhUBwx6aj1"
+      note: "SN33 miner"
+      
+
+logging:
+  level: "INFO"
+  file: "logs/subnetscope.log"
+  rotate_max_bytes: 5242880   # 5 MB
+  rotate_backups: 3

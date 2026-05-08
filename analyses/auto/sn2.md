@@ -1,0 +1,91 @@
+# Subnet 2 — DSperse
+
+> Auto-analyzed: 2026-05-08 06:05 PDT · easy-entry score: 30.7/100 · refreshes hourly
+
+*This analysis is auto-generated from live chain data. It updates every hour.
+For hand-curated notes, check the Bittensor Discord or the subnet's own docs.*
+
+## Quick stats
+
+| Metric | Value |
+|---|---|
+| Category | science |
+| GPU need | medium |
+| Reward shape | winner |
+| Active miners | 88 |
+| UID slots | 256/256 (FULL) |
+| Burn fee | 0.000500 τ `[░░░░░░░░░░░░░░░░░░░░]` 0.0% of max |
+| Burn min / max | 0.000500 τ → 100.0000 τ |
+| Emission / day | 44.5745 τ |
+| Top-1 share | 88.6% |
+| Liquidity (TAO in) | 10,857.6 τ |
+| Price (τ/α) | 0.006191 |
+| Age | 751 days |
+
+
+> **Trend (from 57 snapshots):** Active miner count has grown by 43 since the first recorded snapshot.
+
+## Easy-entry score: 31 / 100  🔴 low
+
+- top1 takes 89% (winner-take-all)
+- subnet is FULL (eviction war)
+- cheap burn fee 0.0005 τ
+
+| Component | Score |
+|---|---|
+| GPU friction | 0.5 / 20 |
+| Decentralization (top-1) | 0.1 / 20 |
+| Active miners | 0.4 / 15 |
+| Free slots | 0.0 / 15 |
+| Burn fee | 1.0 / 15 |
+| Liquidity | 0.1 / 10 |
+| Emission | 0.0 / 5 |
+
+## What is known about this category
+
+This subnet applies ML to a scientific domain (genomics, chemistry, physics, etc.). Domain expertise gives a significant edge.
+
+## GPU / hardware
+
+Medium GPU — aim for an RTX 3090 / A10 (10–24 GB VRAM).
+
+## Reward shape
+
+Reward shape is not yet categorised. Check the subnet's incentive mechanism docs to understand how emissions are distributed.
+
+## Cost to operate a miner
+
+✅ no paid API keys required · 🖥️ GPU required · ℹ️ baseline estimate (check repo to verify)
+
+**Monthly recurring:** ~$250 – $600 · **One-time setup:** ~$700 – $2,200
+
+### Monthly costs
+
+| Item | Required | USD / month | Notes |
+|---|:-:|---|---|
+| GPU rental | ✓ | $250 – $600 | GPU VPS (RTX 4090 / A10, 24 GB VRAM) |
+
+### One-time costs
+
+| Item | Required | USD | Notes |
+|---|:-:|---|---|
+| Registration burn fee (one-time per UID) | ✓ | $0.15 – $0.18 | 0.0005 τ · @ $307.36/τ · includes ~20% buffer for fee jitter |
+| GPU purchase (optional alternative to renting) | — | $700 – $2,200 | RTX 4090 / used 3090 — break-even ~6-12 mo |
+
+> Estimates are baseline ranges from the subnet's category and GPU need; check the subnet's `env.example` / README for specific API key requirements.
+
+## Getting started (generic)
+
+1. Search for this subnet's GitHub/Discord using the links below.
+2. Set up a Bittensor wallet: hot+cold key pair.
+3. Fund with burn fee + buffer (~0.0006 τ recommended).
+4. Clone the subnet repo, run the miner in test mode first.
+5. `btcli subnet register --netuid 2 --wallet.name <cold> --wallet.hotkey <hot>`
+6. Monitor your score during the immunity window.
+
+## Links
+
+- GitHub: <https://github.com/inference-labs-inc/subnet-2>
+- Website: <https://subnet2.inferencelabs.com>
+- TAO.app: <https://tao.app/subnet/2>
+

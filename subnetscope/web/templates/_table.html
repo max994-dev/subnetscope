@@ -1,0 +1,105 @@
+{# Partial: status line + table. Swapped by HTMX into #rows-region. #}
+{% macro fmt_burn(x) -%}
+  {%- if x >= 1 -%}{{ "%.4f"|format(x) }}
+  {%- elif x >= 0.01 -%}{{ "%.5f"|format(x) }}
+  {%- else -%}{{ "%.6f"|format(x) }}
+  {%- endif %} τ
+{%- endmacro %}
+
+{% macro gpu_badge(g) -%}
+  {%- set cls = {"heavy":"gpu-heavy","medium":"gpu-medium","low":"gpu-low",
+                 "none":"gpu-none","varies":"gpu-varies"}.get(g, "gpu-unk") -%}
+  <span class="badge {{ cls }}">{{ g }}</span>
+{%- endmacro %}
+
+{% macro reward_badge(r) -%}
+  {%- set cls = {"winner":"rwd-winner","peak":"rwd-peak",
+                 "topN":"rwd-topN","flat":"rwd-flat"}.get(r, "rwd-unk") -%}
+  <span class="badge {{ cls }}">{{ r }}</span>
+{%- endmacro %}
+
+{% macro demand_cell(r) -%}
+  {%- if r.burn_demand is none -%}<span class="vdim">—</span>
+  {%- else -%}
+    {%- set v = r.burn_demand * 100 -%}
+    {%- if v >= 75 -%}<span class="demand-high">{{ "%.0f"|format(v) }}%</span>
+    {%- elif v >= 25 -%}<span class="demand-mid">{{ "%.0f"|format(v) }}%</span>
+    {%- else -%}<span class="demand-low">{{ "%.0f"|format(v) }}%</span>{%- endif -%}
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro score_cell(s) -%}
+  {%- if s is none -%}<span class="vdim">—</span>
+  {%- else -%}
+    <span class="score-bar"><span class="score-fill" style="width:{{ s }}%"></span></span>
+    <span class="score-num mono">{{ "%.0f"|format(s) }}</span>
+  {%- endif -%}
+{%- endmacro %}
+
+<div class="status-line">
+  <span>sort: <span class="key">{{ sort_pretty }}</span></span>
+  <span class="sep">·</span>
+  <span><span class="num">{{ rows|length }}</span> / {{ all_rows_count }} subnets</span>
+  <span class="sep">·</span>
+  <span class="mono">head {{ head_block }} @ {{ fetched_at }}</span>
+</div>
+
+<div class="table-wrap">
+  <table class="subnet-table">
+    <thead>
+      <tr>
+        <th></th>
+        <th class="right">net</th>
+        <th>name</th>
+        <th>type</th>
+        <th>gpu</th>
+        <th>reward</th>
+        <th class="right">top1%</th>
+        <th class="right">miners</th>
+        <th class="right">burn fee</th>
+        <th class="right">demand</th>
+        <th class="right">used/max</th>
+        <th class="right">τ liq</th>
+        <th class="right">τ/α price</th>
+        <th class="right">emis/d</th>
+        <th class="right">age (d)</th>
+        <th class="right">score</th>
+        <th>description</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr data-netuid="{{ r.netuid }}">
+        <td>
+          <button class="btn-icon star-btn" data-netuid="{{ r.netuid }}"
+                  title="add to watchlist">☆</button>
+        </td>
+        <td class="netuid right"><a href="/subnet/{{ r.netuid }}">{{ r.netuid }}</a></td>
+        <td class="name"><a href="/subnet/{{ r.netuid }}">{{ r.name }}</a></td>
+        <td class="cat">{{ r.category }}</td>
+        <td>{{ gpu_badge(r.gpu_need) }}</td>
+        <td>{{ reward_badge(r.reward_shape) }}</td>
+        <td class="right">
+          {%- if r.top1_share is none -%}<span class="vdim">—</span>
+          {%- else -%}{{ "%.1f"|format(r.top1_share*100) }}%{%- endif -%}
+        </td>
+        <td class="right">
+          {%- if r.active_miners is none -%}<span class="vdim">—</span>
+          {%- else -%}{{ r.active_miners }}{%- endif -%}
+        </td>
+        <td class="right {% if r.is_full %}full{% endif %}">{{ fmt_burn(r.burn_tao) }}</td>
+        <td class="right">{{ demand_cell(r) }}</td>
+        <td class="right {% if r.is_full %}full{% endif %}">{{ r.subnetwork_n }}/{{ r.max_n }}</td>
+        <td class="right tao">{{ "{:,.0f}".format(r.tao_in) }}</td>
+        <td class="right price">{{ "%.5f"|format(r.price) }}</td>
+        <td class="right emi">{{ "%.1f"|format(r.emission_per_day) }}</td>
+        <td class="right age">{{ "%.0f"|format(r.age_days) }}</td>
+        <td class="right">{{ score_cell(r.score) }}</td>
+        <td class="desc" title="{{ r.description }}">
+          {{ r.description[:80] }}{% if r.description|length > 80 %}…{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

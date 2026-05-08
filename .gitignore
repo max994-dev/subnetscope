@@ -1,0 +1,37 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+.uv/
+uv.lock
+logs/
+reports/
+*.csv
+*.json
+!subnetscope/categories.json
+.DS_Store
+
+# Local SQLite / app state
+state.db
+state.db-wal
+state.db-shm
+*.db-wal
+*.db-shm
+
+# Environment and secrets
+.env
+.env.*
+
+# IDE / tooling
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/

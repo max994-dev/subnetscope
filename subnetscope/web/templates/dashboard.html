@@ -1,0 +1,595 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>subnetscope - Bittensor subnet directory</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+  <script src="https://unpkg.com/htmx.org@2.0.3" defer></script>
+  <script src="/static/app.js?v={{ asset_v }}" defer></script>
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <h1>subnetscope</h1>
+      <span class="subtitle">Bittensor subnet directory</span>
+
+      <nav class="nav-tabs">
+        <a href="/" class="{% if active_tab == 'recommendations' %}active{% endif %}">Recommendations</a>
+        <a href="/dashboard" class="{% if active_tab == 'dashboard' %}active{% endif %}">Dashboard</a>
+      </nav>
+
+      <div class="meta">
+        <span>head <span id="head-block" class="mono">{{ head_block }}</span></span>
+        <span class="sep">·</span>
+        <span>scan <span id="fetched-at" class="mono">{{ fetched_at }}</span></span>
+        <span class="sep">·</span>
+        <span><span id="row-count">{{ rows|length }}</span> / {{ all_rows_count }}</span>
+        <span class="sep">·</span>
+        <span>watched <span id="watch-count">0</span></span>
+
+        <div class="bell-wrap">
+          <button id="bell-btn" class="bell-btn" title="Alerts">🔔</button>
+          <span id="alerts-badge" class="bell-badge"></span>
+          <div id="alerts-panel" class="alerts-panel">
+            <header>
+              <h3>Alerts</h3>
+              <span id="alerts-clear" class="clear">mark all seen</span>
+            </header>
+            <div id="alerts-list">
+              <div class="empty">Loading...</div>
+            </div>
+          </div>
+        </div>
+
+        <button id="wallet-btn" class="btn wallet-btn" title="Show TAO balance + stake for a coldkey">
+          Wallet
+        </button>
+
+        <button class="btn"
+                hx-get="/api/rows"
+                hx-include="#filters"
+                hx-target="#rows-region"
+                hx-swap="innerHTML"
+                hx-vals='{"force": "1"}'>
+          force rescan
+        </button>
+        <span class="indicator">⟳</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="page">
+
+    <!-- ═══ Live TAO/USD price card (CoinGecko, polled every 30 s) ═══ -->
+    <section id="tao-price-card" class="tao-card"
+             data-history-hours="24"
+             data-poll-spot-ms="30000"
+             data-poll-chart-ms="300000">
+      <div class="tao-card-left">
+        <div class="tao-card-label">TAO / USD</div>
+        <div class="tao-card-price">
+          <span id="tao-price" class="tao-price-now">
+            {%- if tao_spot and tao_spot.usd is not none -%}
+              ${{ "%.2f"|format(tao_spot.usd) }}
+            {%- else -%}—{%- endif -%}
+          </span>
+          <span id="tao-change" class="tao-change
+            {% if tao_spot and tao_spot.usd_24h_change is not none %}
+              {%- if tao_spot.usd_24h_change >= 0 %} up{% else %} down{% endif -%}
+            {% endif %}">
+            {%- if tao_spot and tao_spot.usd_24h_change is not none -%}
+              {%- if tao_spot.usd_24h_change >= 0 %}+{% endif -%}
+              {{ "%.2f"|format(tao_spot.usd_24h_change) }}%
+            {%- else -%}—{%- endif -%}
+          </span>
+          <span class="tao-change-label">24h</span>
+        </div>
+        <div class="tao-card-meta">
+          <span>mcap <span id="tao-mcap" class="mono">
+            {%- if tao_spot and tao_spot.usd_market_cap -%}
+              ${{ "{:,.0f}".format((tao_spot.usd_market_cap / 1e6)|round(0)) }}M
+            {%- else -%}—{%- endif -%}
+          </span></span>
+          <span class="sep">·</span>
+          <span>vol24h <span id="tao-vol" class="mono">
+            {%- if tao_spot and tao_spot.usd_24h_vol -%}
+              ${{ "{:,.0f}".format((tao_spot.usd_24h_vol / 1e6)|round(0)) }}M
+            {%- else -%}—{%- endif -%}
+          </span></span>
+          <span class="sep">·</span>
+          <span class="vdim">updated <span id="tao-updated" class="mono">—</span></span>
+        </div>
+      </div>
+      <div class="tao-card-right">
+        <canvas id="tao-spark" class="tao-spark-canvas"></canvas>
+        <div class="tao-spark-foot vdim">last 24h · CoinGecko</div>
+      </div>
+    </section>
+
+    <form id="filters" class="filters"
+          hx-get="/api/rows"
+          hx-target="#rows-region"
+          hx-swap="innerHTML"
+          hx-trigger="change from:input, change from:select, keyup changed delay:150ms from:input[name='search']">
+
+      <div class="field f-search">
+        <label class="title">Search</label>
+        <input type="text" name="search" placeholder="name, description, or netuid">
+      </div>
+
+      <div class="field f-sort">
+        <label class="title">Sort (multi-key, comma separated)</label>
+        <input type="text" name="sort"
+               value="{{ default_sort }}"
+               placeholder="gpu:asc, reward:asc, fee:asc">
+        <div class="keys-hint">keys: {{ sort_keys|join(", ") }}</div>
+      </div>
+
+      <div class="field f-cat">
+        <label class="title">Category (none = all)</label>
+        <div class="chips">
+          {% for c in categories %}
+          <label class="chip">
+            <input type="checkbox" name="types" value="{{ c }}"
+                   {% if c in selected_types %}checked{% endif %}>
+            <span>{{ c }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="field f-gpu">
+        <label class="title">GPU need (none = all)</label>
+        <div class="chips">
+          {% for g in gpu_options %}
+          <label class="chip">
+            <input type="checkbox" name="gpus" value="{{ g }}">
+            <span>{{ g }}</span>
+          </label>
+          {% endfor %}
+          <label class="chip toggle" id="watch-only-chip">
+            <input type="checkbox" id="show-only-watched">
+            <span>show only watched</span>
+          </label>
+        </div>
+      </div>
+    </form>
+
+    <div id="rows-region"
+         hx-get="/api/rows"
+         hx-include="#filters"
+         hx-trigger="every {{ refresh_seconds }}s"
+         hx-swap="innerHTML">
+      {% include "_table.html" %}
+    </div>
+
+    {% if failures %}
+    <div class="failures">
+      <h3>{{ failures|length }} subnet(s) failed to scan</h3>
+      <ul>
+        {% for netuid, err in failures.items() %}
+        <li>netuid {{ netuid }}: {{ err }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    <footer class="footnote">
+      subnetscope · table refreshes every {{ refresh_seconds }}s ·
+      <span class="dim">click any netuid for detail · star to watch · alerts in 🔔</span>
+    </footer>
+  </main>
+
+  <!-- ═══ Wallet (read-only coldkey) modal ═══ -->
+  <div id="wallet-modal" class="modal" aria-hidden="true" role="dialog" aria-labelledby="wallet-modal-title">
+    <div class="modal-backdrop" data-close="1"></div>
+    <div class="modal-panel" role="document">
+      <header class="modal-header">
+        <h2 id="wallet-modal-title">Coldkey wallet <span class="vdim">— read-only</span></h2>
+        <button class="modal-close" data-close="1" aria-label="Close">&times;</button>
+      </header>
+
+      <div class="modal-body">
+        <div class="wallet-picker">
+          <label class="wallet-picker-label" for="wallet-select">Coldkey</label>
+          <div class="wallet-picker-row">
+            <select id="wallet-select" class="wallet-select">
+              {% if not coldkey_entries %}
+              <option value="" disabled selected>No coldkeys configured</option>
+              {% else %}
+              <option value="" disabled selected>— pick a coldkey —</option>
+              {% for e in coldkey_entries %}
+              <option value="{{ e.ss58 }}" data-name="{{ e.name }}">
+                {{ e.name or "unnamed" }}{% if e.note %} — {{ e.note }}{% endif %}
+              </option>
+              {% endfor %}
+              {% endif %}
+            </select>
+            {% if coldkey_allow_adhoc %}
+            <input type="text" id="wallet-ss58-input" class="wallet-ss58-input"
+                   placeholder="…or paste any SS58 (5Fxxxx…)" autocomplete="off">
+            {% endif %}
+            <button id="wallet-load-btn" class="btn primary">Load</button>
+            <button id="wallet-refresh-btn" class="btn" title="Force re-query the chain (bypasses 60s cache)">
+              ↻
+            </button>
+          </div>
+          <div class="vdim wallet-picker-hint">
+            Only the public SS58 is queried. No private keys, mnemonics, or
+            passwords are ever read.
+            {% if not coldkey_entries %}
+              Add wallets under <code>coldkeys.entries</code> in <code>config.yaml</code>.
+            {% endif %}
+          </div>
+        </div>
+
+        <div id="wallet-content" class="wallet-content" hidden>
+          <section class="wallet-summary">
+            <div class="wallet-stat">
+              <div class="wallet-stat-label">Free TAO</div>
+              <div class="wallet-stat-value mono" id="wallet-free-tao">—</div>
+            </div>
+            <div class="wallet-stat">
+              <div class="wallet-stat-label">Staked value</div>
+              <div class="wallet-stat-value mono" id="wallet-staked-tao">—</div>
+            </div>
+            <div class="wallet-stat highlight">
+              <div class="wallet-stat-label">Total portfolio</div>
+              <div class="wallet-stat-value mono" id="wallet-total-tao">—</div>
+              <div class="wallet-stat-sub mono vdim" id="wallet-total-usd">—</div>
+            </div>
+            <div class="wallet-stat">
+              <div class="wallet-stat-label">Positions</div>
+              <div class="wallet-stat-value mono" id="wallet-position-count">—</div>
+              <div class="wallet-stat-sub vdim">across subnets</div>
+            </div>
+          </section>
+
+          <div class="wallet-meta vdim">
+            <span id="wallet-ss58-display" class="mono"></span>
+            <span class="sep">·</span>
+            <span>updated <span id="wallet-updated" class="mono">—</span></span>
+            <span id="wallet-stale-tag" class="stale-tag" hidden>stale</span>
+          </div>
+
+          <div class="wallet-positions-wrap">
+            <table class="wallet-table">
+              <thead>
+                <tr>
+                  <th class="right">UID</th>
+                  <th>Subnet</th>
+                  <th>Hotkey</th>
+                  <th class="right">Stake (α)</th>
+                  <th class="right">Price</th>
+                  <th class="right">Value (τ)</th>
+                  <th class="right">% port</th>
+                </tr>
+              </thead>
+              <tbody id="wallet-positions"></tbody>
+            </table>
+            <div id="wallet-empty" class="vdim wallet-empty" hidden>
+              No stake positions found for this coldkey.
+            </div>
+          </div>
+        </div>
+
+        <div id="wallet-error" class="wallet-error" hidden></div>
+        <div id="wallet-loading" class="wallet-loading vdim" hidden>Querying chain…</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Toggle "watch-only" chip class so it shows visually when active
+    document.getElementById("show-only-watched").addEventListener("change", function (e) {
+      document.getElementById("watch-only-chip").classList.toggle("on", e.target.checked);
+    });
+  </script>
+
+  <script>
+    /* ═══ Wallet modal (read-only coldkey balance + stake) ═══ */
+    (function () {
+      "use strict";
+      var modal     = document.getElementById("wallet-modal");
+      var openBtn   = document.getElementById("wallet-btn");
+      if (!modal || !openBtn) return;
+
+      var sel       = document.getElementById("wallet-select");
+      var input     = document.getElementById("wallet-ss58-input");
+      var loadBtn   = document.getElementById("wallet-load-btn");
+      var refreshBtn= document.getElementById("wallet-refresh-btn");
+      var content   = document.getElementById("wallet-content");
+      var errEl     = document.getElementById("wallet-error");
+      var loadingEl = document.getElementById("wallet-loading");
+
+      var elFree    = document.getElementById("wallet-free-tao");
+      var elStaked  = document.getElementById("wallet-staked-tao");
+      var elTotal   = document.getElementById("wallet-total-tao");
+      var elTotalU  = document.getElementById("wallet-total-usd");
+      var elPosCnt  = document.getElementById("wallet-position-count");
+      var elSs58Disp= document.getElementById("wallet-ss58-display");
+      var elUpdated = document.getElementById("wallet-updated");
+      var elStale   = document.getElementById("wallet-stale-tag");
+      var elPos     = document.getElementById("wallet-positions");
+      var elEmpty   = document.getElementById("wallet-empty");
+
+      var lastSs58  = null;
+
+      function fmtTao(v, dp) {
+        if (v == null || isNaN(v)) return "—";
+        var d = (dp == null) ? 4 : dp;
+        return v.toLocaleString(undefined,
+                 { minimumFractionDigits: d, maximumFractionDigits: d }) + " τ";
+      }
+      function fmtAlpha(v) {
+        if (v == null || isNaN(v)) return "—";
+        if (v >= 1)    return v.toFixed(4);
+        if (v >= 0.01) return v.toFixed(5);
+        return v.toFixed(6);
+      }
+      function fmtPct(v) {
+        if (v == null || isNaN(v)) return "—";
+        return (v * 100).toFixed(2) + "%";
+      }
+      function fmtTime(ts) {
+        if (!ts) return "—";
+        return new Date(ts * 1000).toLocaleTimeString();
+      }
+      function shorten(s) {
+        if (!s || s.length < 14) return s || "—";
+        return s.slice(0, 6) + "…" + s.slice(-4);
+      }
+
+      function open() {
+        modal.setAttribute("aria-hidden", "false");
+        modal.classList.add("open");
+        document.body.classList.add("modal-open");
+      }
+      function close() {
+        modal.setAttribute("aria-hidden", "true");
+        modal.classList.remove("open");
+        document.body.classList.remove("modal-open");
+      }
+      function showErr(msg) {
+        content.hidden = true;
+        loadingEl.hidden = true;
+        errEl.hidden = false;
+        errEl.textContent = msg || "Lookup failed.";
+      }
+      function showLoading(msg) {
+        errEl.hidden = true;
+        loadingEl.hidden = false;
+        loadingEl.textContent = msg || "Querying chain…";
+      }
+
+      function render(data) {
+        loadingEl.hidden = true;
+        if (!data || data.error) { showErr(data && data.error || "lookup failed"); return; }
+        errEl.hidden = true;
+        content.hidden = false;
+
+        elFree.textContent   = fmtTao(data.free_tao, 6);
+        elStaked.textContent = fmtTao(data.total_stake_value_tao, 6);
+        elTotal.textContent  = fmtTao(data.total_value_tao, 6);
+        elPosCnt.textContent = data.position_count != null ? String(data.position_count) : "—";
+        elSs58Disp.textContent = data.ss58 || "";
+        elUpdated.textContent  = fmtTime(data.ts);
+        elStale.hidden = !data.stale;
+
+        // Convert total to USD using whatever the ticker last cached.
+        // Fall back to refetching /api/tao-price if we don't have one.
+        var rate = window.snTaoUsdRate;
+        if (!rate) {
+          fetch("/api/tao-price").then(function (r) { return r.json(); })
+            .then(function (s) {
+              window.snTaoUsdRate = (s && s.usd) || null;
+              if (window.snTaoUsdRate) {
+                elTotalU.textContent = "≈ $" + (data.total_value_tao * window.snTaoUsdRate)
+                  .toLocaleString(undefined, { maximumFractionDigits: 2 });
+              }
+            }).catch(function () {});
+        } else {
+          elTotalU.textContent = "≈ $" + (data.total_value_tao * rate)
+            .toLocaleString(undefined, { maximumFractionDigits: 2 });
+        }
+
+        // Positions table
+        elPos.innerHTML = "";
+        var total = data.total_value_tao || 0;
+        var positions = data.positions || [];
+        if (positions.length === 0) {
+          elEmpty.hidden = false;
+        } else {
+          elEmpty.hidden = true;
+          positions.forEach(function (p) {
+            var pct = total > 0 ? (p.stake_value_tao / total) : 0;
+            var tr = document.createElement("tr");
+            tr.innerHTML =
+              "<td class='right mono'>" + p.netuid + "</td>" +
+              "<td><a href='/subnet/" + p.netuid + "'>" + escapeHtml(p.name) + "</a></td>" +
+              "<td class='mono' title='" + escapeAttr(p.hotkey) + "'>" + escapeHtml(p.hotkey_short || "—") + "</td>" +
+              "<td class='right mono'>" + fmtAlpha(p.stake_alpha) + "</td>" +
+              "<td class='right mono'>" + (p.netuid === 0 ? "1.000000"
+                  : (p.price_tao_per_alpha || 0).toFixed(6)) + "</td>" +
+              "<td class='right mono'>" + fmtTao(p.stake_value_tao, 6) + "</td>" +
+              "<td class='right mono'>" + fmtPct(pct) + "</td>";
+            elPos.appendChild(tr);
+          });
+        }
+      }
+
+      function escapeHtml(s) {
+        return String(s == null ? "" : s)
+          .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      }
+      function escapeAttr(s) {
+        return escapeHtml(s).replace(/"/g, "&quot;");
+      }
+
+      function selectedSs58() {
+        var pasted = (input && input.value || "").trim();
+        if (pasted) return pasted;
+        return (sel && sel.value) || "";
+      }
+
+      function load(force) {
+        var ss58 = selectedSs58();
+        if (!ss58) { showErr("Pick a coldkey or paste an SS58 address."); return; }
+        // Quick client-side sanity check.
+        if (!/^[1-9A-HJ-NP-Za-km-z]{47,48}$/.test(ss58)) {
+          showErr("That doesn't look like a valid SS58 address."); return;
+        }
+        lastSs58 = ss58;
+        showLoading();
+        content.hidden = true;
+        var url = "/api/coldkey/" + encodeURIComponent(ss58)
+                  + (force ? "?force=1" : "");
+        fetch(url, { cache: "no-store" })
+          .then(function (r) {
+            if (!r.ok) {
+              return r.json().catch(function () { return null; })
+                .then(function (j) {
+                  throw new Error((j && j.error) || ("HTTP " + r.status));
+                });
+            }
+            return r.json();
+          })
+          .then(render)
+          .catch(function (e) { showErr(String(e.message || e)); });
+      }
+
+      // -------- wire events --------
+      openBtn.addEventListener("click", function () {
+        open();
+        // Auto-load if there's only one entry & nothing pasted.
+        if (sel && sel.options.length === 2 && !content.hidden === false) {
+          // (1 placeholder + 1 entry) → preselect & load
+          sel.selectedIndex = 1;
+          load(false);
+        }
+      });
+      modal.addEventListener("click", function (e) {
+        if (e.target.getAttribute("data-close") === "1") close();
+      });
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && modal.classList.contains("open")) close();
+      });
+      loadBtn.addEventListener("click", function () { load(false); });
+      if (refreshBtn) refreshBtn.addEventListener("click", function () { load(true); });
+      if (input) input.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); load(false); }
+      });
+      if (sel) sel.addEventListener("change", function () {
+        // If user picks from dropdown, clear the paste field so it wins.
+        if (input) input.value = "";
+        load(false);
+      });
+    })();
+  </script>
+
+  <script>
+    /* ═══ Live TAO/USD ticker + 24h sparkline ═══ */
+    (function () {
+      "use strict";
+      var card = document.getElementById("tao-price-card");
+      if (!card) return;
+
+      var pollSpotMs  = parseInt(card.getAttribute("data-poll-spot-ms"),  10) || 30000;
+      var pollChartMs = parseInt(card.getAttribute("data-poll-chart-ms"), 10) || 300000;
+      var hours       = parseFloat(card.getAttribute("data-history-hours")) || 24;
+
+      var elPrice   = document.getElementById("tao-price");
+      var elChange  = document.getElementById("tao-change");
+      var elMcap    = document.getElementById("tao-mcap");
+      var elVol     = document.getElementById("tao-vol");
+      var elUpdated = document.getElementById("tao-updated");
+
+      function fmtUsd(v) {
+        if (v == null || isNaN(v)) return "—";
+        if (v >= 1000) return "$" + v.toLocaleString(undefined, { maximumFractionDigits: 0 });
+        if (v >= 1)    return "$" + v.toFixed(2);
+        return "$" + v.toFixed(4);
+      }
+      function fmtBig(v) {
+        if (v == null || isNaN(v)) return "—";
+        if (v >= 1e9) return "$" + (v / 1e9).toFixed(2) + "B";
+        if (v >= 1e6) return "$" + (v / 1e6).toFixed(0) + "M";
+        if (v >= 1e3) return "$" + (v / 1e3).toFixed(1) + "K";
+        return "$" + v.toFixed(0);
+      }
+      function fmtPct(v) {
+        if (v == null || isNaN(v)) return "—";
+        return (v >= 0 ? "+" : "") + v.toFixed(2) + "%";
+      }
+      function fmtTime(ts) {
+        if (!ts) return "—";
+        var d = new Date(ts * 1000);
+        return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      }
+
+      function applySpot(s) {
+        if (!s) return;
+        if (s.usd != null) {
+          elPrice.textContent = fmtUsd(s.usd);
+          // Publish for other UI (wallet modal converts TAO totals to USD).
+          window.snTaoUsdRate = s.usd;
+        }
+        if (s.usd_24h_change != null) {
+          elChange.textContent = fmtPct(s.usd_24h_change);
+          elChange.classList.remove("up", "down");
+          elChange.classList.add(s.usd_24h_change >= 0 ? "up" : "down");
+        }
+        if (s.usd_market_cap != null) elMcap.textContent = fmtBig(s.usd_market_cap);
+        if (s.usd_24h_vol  != null)   elVol.textContent  = fmtBig(s.usd_24h_vol);
+        if (s.ts) elUpdated.textContent = fmtTime(s.ts);
+        card.classList.toggle("stale", !!s.stale);
+      }
+
+      function applyChart(c) {
+        if (!c || !c.points || c.points.length === 0) return;
+        // window.snDrawSparkline accepts [{v: number}, ...]
+        var pts = c.points.map(function (p) { return { v: p.v }; });
+        var color = "#22d3ee";
+        // Recolor based on net 24h direction.
+        if (pts.length >= 2) {
+          var first = pts[0].v, last = pts[pts.length - 1].v;
+          color = last >= first ? "#34d399" : "#f87171";
+        }
+        if (typeof window.snDrawSparkline === "function") {
+          window.snDrawSparkline("tao-spark", pts, color);
+        }
+      }
+
+      function pollSpot() {
+        fetch("/api/tao-price", { cache: "no-store" })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(applySpot)
+          .catch(function () { /* ignore */ });
+      }
+      function pollChart() {
+        fetch("/api/tao-price/history?hours=" + encodeURIComponent(hours),
+              { cache: "no-store" })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(applyChart)
+          .catch(function () { /* ignore */ });
+      }
+
+      // Kick off immediately (so the spark/labels populate on first paint).
+      pollSpot();
+      pollChart();
+      setInterval(pollSpot,  pollSpotMs);
+      setInterval(pollChart, pollChartMs);
+
+      // Redraw chart on resize so it stays crisp on DPI / layout changes.
+      var resizeT = null;
+      window.addEventListener("resize", function () {
+        if (resizeT) clearTimeout(resizeT);
+        resizeT = setTimeout(pollChart, 200);
+      });
+    })();
+  </script>
+</body>
+</html>
