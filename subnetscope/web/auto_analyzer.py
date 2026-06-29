@@ -25,7 +25,7 @@ from pathlib import Path
 
 from ..types import SubnetRow
 from .cost_estimator import estimate as estimate_costs, render_markdown as render_costs_md
-from .score import ScoreBreakdown
+from .score import ScoreBreakdown, WEIGHTS
 
 log = logging.getLogger(__name__)
 
@@ -53,14 +53,19 @@ _CATEGORY_NOTES: dict[str, str] = {
         "Earnings depend on disk size, retrieval speed, and uptime. "
         "No GPU required; invest in SSD and upload bandwidth instead."
     ),
-    "text": (
+    "llm": (
         "This subnet produces or evaluates natural-language content. "
         "A local LLM (Llama 3.1 8B) is usually sufficient; "
         "GPU is helpful for fast inference but not always required."
     ),
-    "image": (
-        "This subnet processes or generates images. "
-        "A mid-range GPU (8+ GB VRAM) is typically needed."
+    "vision": (
+        "This subnet processes or generates images / video. "
+        "A mid-range to high-end GPU (8+ GB VRAM) is typically needed."
+    ),
+    "infra": (
+        "This subnet provides infrastructure or meta-coordination for the "
+        "network (registries, validation-of-validators, hashing, governance). "
+        "Requirements vary widely — read the repo docs carefully."
     ),
     "audio": (
         "This subnet produces or evaluates audio / speech content. "
@@ -99,18 +104,18 @@ _GPU_NOTES: dict[str, str] = {
 }
 
 _REWARD_NOTES: dict[str, str] = {
-    "winner-take-all": (
-        "**Winner-take-all:** the single best scorer takes all (or nearly all) "
-        "emission each round. Expect lumpy, high-variance income. "
+    "winner": (
+        "**Winner-take-all:** the single best scorer takes most (>50%) of the "
+        "miner emission. Expect lumpy, high-variance income. "
         "You need to be consistently near the top to earn meaningfully."
     ),
-    "top-n": (
-        "**Top-N rewards:** emission concentrates in the top-N miners. "
-        "Breaking into the top tier is key; mid-pack earns modestly."
+    "peak": (
+        "**Peaked:** emission concentrates in a handful of miners (top ~5 take "
+        ">80%). Breaking into that small leading group is essential."
     ),
-    "proportional": (
-        "**Proportional rewards:** emission is distributed based on relative "
-        "score. Consistent improvement directly translates to higher earnings."
+    "topn": (
+        "**Top-N rewards:** emission concentrates in the top ~10 miners. "
+        "Breaking into the top tier is key; mid-pack earns modestly."
     ),
     "flat": (
         "**Flat rewards:** all miners above a quality threshold earn equally. "
@@ -258,15 +263,15 @@ For hand-curated notes, check the Bittensor Discord or the subnet's own docs.*
 
 {why_bullets}
 
-| Component | Score |
+| Component | Points |
 |---|---|
-| GPU friction | {sb.gpu:.1f} / 20 |
-| Decentralization (top-1) | {sb.top1:.1f} / 20 |
-| Active miners | {sb.miners:.1f} / 15 |
-| Free slots | {sb.slots:.1f} / 15 |
-| Burn fee | {sb.fee:.1f} / 15 |
-| Liquidity | {sb.liquidity:.1f} / 10 |
-| Emission | {sb.emission:.1f} / 5 |
+| GPU friction | {sb.gpu * WEIGHTS['gpu'] * 100:.1f} / {WEIGHTS['gpu'] * 100:.0f} |
+| Decentralization (top-1) | {sb.top1 * WEIGHTS['top1'] * 100:.1f} / {WEIGHTS['top1'] * 100:.0f} |
+| Active miners | {sb.miners * WEIGHTS['miners'] * 100:.1f} / {WEIGHTS['miners'] * 100:.0f} |
+| Free slots | {sb.slots * WEIGHTS['slots'] * 100:.1f} / {WEIGHTS['slots'] * 100:.0f} |
+| Burn fee | {sb.fee * WEIGHTS['fee'] * 100:.1f} / {WEIGHTS['fee'] * 100:.0f} |
+| Liquidity | {sb.liquidity * WEIGHTS['liquidity'] * 100:.1f} / {WEIGHTS['liquidity'] * 100:.0f} |
+| Emission | {sb.emission * WEIGHTS['emission'] * 100:.1f} / {WEIGHTS['emission'] * 100:.0f} |
 
 ## What is known about this category
 

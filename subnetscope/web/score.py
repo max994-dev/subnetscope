@@ -94,8 +94,8 @@ def score_subnet(r: SubnetRow, cohort: list[SubnetRow]) -> ScoreBreakdown:
     if s_gpu >= 0.8:           why.append(f"no/low GPU ({r.gpu_need})")
     elif s_gpu <= 0.1:         why.append(f"heavy GPU need")
     if r.top1_share is not None:
-        if r.top1_share <= 0.20: why.append(f"top1 only {r.top1_share*100:.0f}% (decentralized)")
-        elif r.top1_share >= 0.80: why.append(f"top1 takes {r.top1_share*100:.0f}% (winner-take-all)")
+        if r.top1_share <= 0.20: why.append(f"top miner incentive only {r.top1_share*100:.0f}% (decentralized)")
+        elif r.top1_share >= 0.80: why.append(f"top miner incentive {r.top1_share*100:.0f}% (winner-take-all)")
     if s_slots >= 0.10:        why.append(f"{r.slots_free} free UID slots")
     elif r.subnetwork_n >= r.max_n > 0: why.append("subnet is FULL (eviction war)")
     if s_fee >= 0.8 and r.recycle_tao > 0:

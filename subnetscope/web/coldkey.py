@@ -64,6 +64,7 @@ class ColdkeyService:
         self._lock = threading.Lock()
         self._cache: dict[str, _Snapshot] = {}
         self._fetching: set[str] = set()
+        self._wallet_hist_last: dict[str, float] = {}
 
     # ------------------------------------------------------------------ chain
 
@@ -110,6 +111,7 @@ class ColdkeyService:
         # Build a price/name lookup from the cached scanner rows so we can
         # convert per-subnet alpha into a TAO-equivalent value.
         subnet_lookup = self._subnet_lookup()
+        hotkey_names = self._hotkey_names()
         positions: list[dict[str, Any]] = []
         total_stake_value_tao = 0.0
         for s in stakes:
@@ -134,13 +136,61 @@ class ColdkeyService:
                     "root" if netuid == 0 else f"sn{netuid}"),
                 "hotkey": hotkey_ss58,
                 "hotkey_short": _short(hotkey_ss58),
+                "hotkey_name": hotkey_names.get(hotkey_ss58) or None,
                 "stake_alpha": stake_alpha,
                 "stake_value_tao": stake_value_tao,
                 "price_tao_per_alpha": price,
+                "pool_tao_in": float(info.get("tao_in", 0.0)),
+                "pool_alpha_in": float(info.get("alpha_in", 0.0)),
                 "emission_alpha": emission_alpha,
                 "emission_value_tao": emission_value_tao,
             })
 
+        # Also surface hotkeys this coldkey has *registered* on a subnet, even
+        # when they hold no alpha stake (e.g. a freshly registered miner). The
+        # stake loop above only yields staked positions, so registered-but-
+        # unstaked hotkeys would otherwise be invisible in the wallet modal.
+        seen = {(p["hotkey"], int(p["netuid"])) for p in positions}
+        registered_pairs: set[tuple[str, int]] = set()
+        try:
+            owned = sub.get_owned_hotkeys(ss58) or []
+            for hk in owned:
+                hk_s = str(hk)
+                try:
+                    nets = sub.get_netuids_for_hotkey(hk_s) or []
+                except Exception:  # noqa: BLE001
+                    nets = []
+                for nu in nets:
+                    registered_pairs.add((hk_s, int(nu)))
+        except Exception as e:  # noqa: BLE001
+            log.debug("coldkey %s: registered-hotkey lookup failed: %s", ss58, e)
+
+        # Flag staked positions that are also registered, then append the
+        # registered-only (zero-stake) hotkeys.
+        for p in positions:
+            p["registered"] = (p["hotkey"], int(p["netuid"])) in registered_pairs
+        for hk_s, nu in registered_pairs:
+            if (hk_s, nu) in seen:
+                continue
+            info = subnet_lookup.get(nu) or {}
+            price = 1.0 if nu == 0 else float(info.get("price", 0.0))
+            positions.append({
+                "netuid": nu,
+                "name": info.get("name") or ("root" if nu == 0 else f"sn{nu}"),
+                "hotkey": hk_s,
+                "hotkey_short": _short(hk_s),
+                "hotkey_name": hotkey_names.get(hk_s) or None,
+                "stake_alpha": 0.0,
+                "stake_value_tao": 0.0,
+                "price_tao_per_alpha": price,
+                "pool_tao_in": float(info.get("tao_in", 0.0)),
+                "pool_alpha_in": float(info.get("alpha_in", 0.0)),
+                "emission_alpha": 0.0,
+                "emission_value_tao": 0.0,
+                "registered": True,
+            })
+
+        # Staked positions first (by value), registered-only ones at the bottom.
         positions.sort(key=lambda p: p["stake_value_tao"], reverse=True)
         total_value_tao = free_tao + total_stake_value_tao
 
@@ -152,6 +202,16 @@ class ColdkeyService:
             fetched_at=time.time(),
             error=None,
         )
+
+    def _hotkey_names(self) -> dict[str, str]:
+        """SS58 -> friendly name from the configured ``hotkeys.entries``."""
+        try:
+            from .cache import get_scanner
+            cfg = get_scanner().cfg
+        except Exception:  # noqa: BLE001
+            return {}
+        return {(e.ss58 or "").strip(): (e.name or "").strip()
+                for e in (cfg.hotkeys.entries or []) if e.ss58 and e.name}
 
     def _subnet_lookup(self) -> dict[int, dict[str, Any]]:
         try:
@@ -166,6 +226,8 @@ class ColdkeyService:
                 "name": r.name or f"sn{r.netuid}",
                 "price": float(r.price_tao_per_alpha or 0.0),
                 "category": r.category,
+                "tao_in": float(r.tao_in or 0.0),
+                "alpha_in": float(r.alpha_in or 0.0),
             }
         return out
 
@@ -197,7 +259,7 @@ class ColdkeyService:
             if ss58 not in self._fetching:
                 self._fetching.add(ss58)
                 threading.Thread(
-                    target=self._bg_refresh, args=(ss58,),
+                    target=self._bg_refresh, args=(ss58, force),
                     name=f"coldkey-{ss58[:8]}", daemon=True,
                 ).start()
 
@@ -219,7 +281,28 @@ class ColdkeyService:
         return _result(ss58, snap, stale=force or
                        (time.time() - snap.fetched_at) >= self.ttl)
 
-    def _bg_refresh(self, ss58: str) -> None:
+    def _maybe_record_wallet_history(
+        self, ss58: str, snap: _Snapshot, *, force_refresh: bool,
+    ) -> None:
+        now = time.time()
+        gap = 0.0 if force_refresh else 300.0
+        with self._lock:
+            last = self._wallet_hist_last.get(ss58, 0.0)
+            if now - last < gap:
+                return
+            self._wallet_hist_last[ss58] = now
+        try:
+            from .cache import get_scanner
+
+            get_scanner().db.append_wallet_stake_snapshot(
+                ss58,
+                free_tao=snap.free_tao,
+                positions=snap.positions,
+            )
+        except Exception:  # noqa: BLE001
+            log.debug("wallet history append failed", exc_info=True)
+
+    def _bg_refresh(self, ss58: str, force_refresh: bool = False) -> None:
         try:
             snap = self._fetch_from_chain(ss58)
             with self._lock:
@@ -232,6 +315,9 @@ class ColdkeyService:
                 else:
                     log.debug("coldkey %s: refresh failed (%s); keeping prior",
                               ss58, snap.error)
+            if snap.error is None:
+                self._maybe_record_wallet_history(
+                    ss58, snap, force_refresh=force_refresh)
         finally:
             with self._lock:
                 self._fetching.discard(ss58)

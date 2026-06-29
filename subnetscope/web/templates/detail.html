@@ -22,18 +22,23 @@
     {%- if x is none -%}<span class="vdim">—</span>
     {%- else -%}{{ x }}{%- endif -%}
   {%- endmacro %}
+  {% macro copybtn(value, label="coldkey") -%}
+    {%- if value -%}<button class="copy-btn" type="button" data-copy="{{ value }}" title="Copy {{ label }}" aria-label="Copy {{ label }}">⧉</button>{%- endif -%}
+  {%- endmacro %}
 
   {% set burn_demand_pct = (r.burn_demand * 100) if r.burn_demand is not none else None %}
 
-  <header class="topbar">
-    <div class="detail-header">
-      <a href="/" class="btn">← back</a>
-      <h1>subnet <span class="net">{{ r.netuid }}</span> — {{ r.name }}</h1>
-      <span class="meta">head {{ head_block }} @ {{ fetched_at }}</span>
-    </div>
-  </header>
+  {% set show_tools = true %}{% set active_nav = "subnets" %}
+  {% include "_header.html" %}
 
-  <main class="page">
+  <div class="page detail-tabs-wrap">
+    <div class="detail-tabs" role="tablist" aria-label="Subnet detail sections">
+      <button class="tab-btn active" data-tab="info" role="tab" aria-selected="true" aria-controls="tab-info">Info</button>
+      <button class="tab-btn" data-tab="readme" role="tab" aria-selected="false" aria-controls="tab-readme">Readme</button>
+    </div>
+  </div>
+
+  <main class="page tab-panel" id="tab-info">
 
     <!-- Two-column: main content + sticky right sidebar -->
     <div class="detail-layout">
@@ -41,154 +46,180 @@
       <!-- ══════════ LEFT MAIN ══════════ -->
       <div class="detail-main">
 
-        <!-- Analysis card (curated or auto) -->
-        {% if analysis %}
-        <section class="card analysis-card">
-          <div class="analysis-head">
-            <div>
-              <h2 style="margin:0;">{{ analysis.title or ("Analysis · subnet " ~ r.netuid) }}</h2>
-              {% if analysis.analyzed_label %}
-              <div class="analysis-meta">{{ analysis.analyzed_label }} · file last updated {{ analysis.file_mtime_iso }}</div>
-              {% else %}
-              <div class="analysis-meta">file last updated {{ analysis.file_mtime_iso }}</div>
-              {% endif %}
+        <!-- ══ Identity hero — the face of the page ══ -->
+        <section class="card identity-hero">
+          <div class="ident-head">
+            <span class="ident-netuid">SN<span class="ident-netuid-num">{{ r.netuid }}</span></span>
+            <div class="ident-title">
+              <h1 class="ident-name">{{ r.name }}</h1>
+              <div class="ident-chips">
+                <span class="ident-chip cat">{{ r.category }}</span>
+                <span class="ident-chip">GPU: {{ r.gpu_need }}</span>
+                <span class="ident-chip">{{ r.reward_shape }} rewards</span>
+                {% if r.is_full %}
+                <span class="ident-chip full">FULL</span>
+                {% else %}
+                <span class="ident-chip free">{{ r.slots_free }} slot{{ "s" if r.slots_free != 1 }} free</span>
+                {% endif %}
+              </div>
             </div>
-            {% if analysis.is_auto %}
-            <span class="analysis-badge auto">auto · 1h refresh</span>
+          </div>
+
+          {% if r.description %}
+          <p class="ident-desc">{{ r.description }}</p>
+          {% endif %}
+
+          <div class="ident-links">
+            {% if r.github_repo %}<a class="ident-link" href="{{ r.github_repo }}" target="_blank" rel="noopener">GitHub ↗</a>{% endif %}
+            {% if r.subnet_url %}<a class="ident-link" href="{{ r.subnet_url }}" target="_blank" rel="noopener">Website ↗</a>{% endif %}
+            {% if r.discord %}<a class="ident-link" href="{% if r.discord.startswith('http') %}{{ r.discord }}{% else %}https://{{ r.discord }}{% endif %}" target="_blank" rel="noopener">Discord ↗</a>{% endif %}
+            <a class="ident-link" href="https://taostats.io/subnets/{{ r.netuid }}" target="_blank" rel="noopener">Taostats ↗</a>
+          </div>
+
+          <div class="ident-metrics">
+            <div class="ident-metric">
+              <span class="im-val ok mono">{{ "{:,.1f}".format(r.emission_per_day) }} τ</span>
+              <span class="im-lbl">Emission / day</span>
+            </div>
+            <div class="ident-metric">
+              <span class="im-val mono">{{ r.subnetwork_n }}/{{ r.max_n }}</span>
+              <span class="im-lbl">UID slots</span>
+            </div>
+            <div class="ident-metric">
+              <span class="im-val mono">{{ "%.4f"|format(r.burn_tao) }} τ</span>
+              <span class="im-lbl">Reg fee</span>
+            </div>
+            <div class="ident-metric">
+              <span class="im-val mono">{{ "%.5f"|format(r.price) }} τ</span>
+              <span class="im-lbl">Price / α</span>
+            </div>
+            <div class="ident-metric">
+              <span class="im-val mono">{{ "%.0f"|format(r.age_days) }} d</span>
+              <span class="im-lbl">Age</span>
+            </div>
+            <div class="ident-metric">
+              <span class="im-val mono">{{ val(r.active_miners) }}</span>
+              <span class="im-lbl">Active miners</span>
+            </div>
+          </div>
+        </section>
+
+        {% if miner_dist and miner_dist.churn %}
+        {% set ch = miner_dist.churn %}
+        <section class="card churn-card">
+          <h2>Hotkey turnover
+            <span class="vdim churn-sub">registrations ⇄ deregistrations · live on-chain data</span>
+          </h2>
+          <p class="vdim churn-note">
+            {% if ch.is_full %}
+              Subnet is <strong>full</strong> ({{ ch.total_uids }} UIDs, 0 free) — every new
+              registration evicts an existing UID, so here
+              <strong>registrations ≈ deregistrations</strong>.
             {% else %}
-            <span class="analysis-badge">curated</span>
+              {{ ch.slots_free }} UID slot{{ "s" if ch.slots_free != 1 }} still free — new
+              registrations mostly fill empty slots, so they <em>over-count</em> real
+              deregistrations until the subnet fills.
             {% endif %}
+            Counts come from every UID's on-chain registration block (ref block {{ ch.ref_block }}),
+            not an estimate.
+          </p>
+          <div class="churn-grid">
+            <div class="churn-stat">
+              <span class="churn-num mono">{{ ch.reg_24h }}</span>
+              <span class="churn-lbl">{{ "deregs" if ch.is_full else "regs" }} · 24h</span>
+            </div>
+            <div class="churn-stat">
+              <span class="churn-num mono">{{ ch.reg_7d }}</span>
+              <span class="churn-lbl">{{ "deregs" if ch.is_full else "regs" }} · 7d</span>
+            </div>
+            <div class="churn-stat">
+              <span class="churn-num mono">{{ ch.reg_30d }}</span>
+              <span class="churn-lbl">{{ "deregs" if ch.is_full else "regs" }} · 30d</span>
+            </div>
+            <div class="churn-stat">
+              <span class="churn-num mono">{{ "%.1f"|format(ch.reg_per_day) }}<span class="churn-unit">/day</span></span>
+              <span class="churn-lbl">avg churn (7d)</span>
+            </div>
+            <div class="churn-stat">
+              <span class="churn-num mono">{{ "%.0f"|format(ch.turnover_pct_30d) }}%</span>
+              <span class="churn-lbl">UIDs replaced · 30d</span>
+            </div>
           </div>
-          <div class="analysis-prose">
-            {{ analysis.body_html | safe }}
-          </div>
+          <dl class="kv kv-compact churn-kv">
+            <dt>Median hotkey tenure</dt><dd class="mono">{{ ch.median_tenure_label }}</dd>
+            <dt>Newest registration</dt><dd class="mono">{{ ch.newest_label }}</dd>
+            <dt title="A UID, once registered, survives this many blocks before it can be deregistered">Immunity period</dt>
+            <dd class="mono">{% if ch.immunity_label %}{{ ch.immunity_label }}{% else %}<span class="vdim">—</span>{% endif %}</dd>
+            <dt title="Tenure of the longest-surviving UID on the subnet">Oldest UID tenure</dt>
+            <dd class="mono">{{ ch.oldest_label }}</dd>
+          </dl>
         </section>
         {% endif %}
 
-        <section class="card">
-          <h2>Identity</h2>
-          <dl class="kv">
-            <dt>Netuid</dt>      <dd class="mono">{{ r.netuid }}</dd>
-            <dt>Name</dt>        <dd>{{ r.name }}</dd>
-            <dt>Category</dt>    <dd>{{ r.category }}</dd>
-            <dt>GPU need</dt>    <dd>{{ r.gpu_need }}</dd>
-            <dt>Reward shape</dt><dd>{{ r.reward_shape }}</dd>
-            <dt>GitHub</dt>      <dd>{% if r.github_repo %}<a href="{{ r.github_repo }}" target="_blank">{{ r.github_repo }}</a>{% else %}<span class="vdim">—</span>{% endif %}</dd>
-            <dt>URL</dt>         <dd>{% if r.subnet_url %}<a href="{{ r.subnet_url }}" target="_blank">{{ r.subnet_url }}</a>{% else %}<span class="vdim">—</span>{% endif %}</dd>
-            <dt>Discord</dt>     <dd>{% if r.discord %}<a href="{{ r.discord }}" target="_blank">{{ r.discord }}</a>{% else %}<span class="vdim">—</span>{% endif %}</dd>
-          </dl>
-          {% if r.description %}
-          <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
-            <div style="font-size:11px; color:var(--fg-very-dim); text-transform:uppercase; margin-bottom:4px;">Description</div>
-            <p style="margin:0; color:var(--fg-muted);">{{ r.description }}</p>
+        {% if rank_tenure %}
+        {% set rt = rank_tenure %}
+        <section class="card ranktenure-card">
+          <h2>Top-rank stability
+            <span class="vdim churn-sub">how long the current leaders keep their rank</span>
+          </h2>
+          {% if rt.enough %}
+          <div class="churn-grid">
+            <div class="churn-stat">
+              <span class="churn-num mono">{{ rt.leader_top1_label }}</span>
+              <span class="churn-lbl">#1 held by {{ rt.leader_hotkey_short }}</span>
+            </div>
+            <div class="churn-stat">
+              <span class="churn-num mono">{{ rt.median_hold_label }}</span>
+              <span class="churn-lbl">median top-{{ rt.top_n }} hold</span>
+            </div>
+            <div class="churn-stat">
+              <span class="churn-num mono">{{ rt.turnover_24h }}<span class="churn-unit">/{{ rt.top_n }}</span></span>
+              <span class="churn-lbl">top-{{ rt.top_n }} changed · 24h</span>
+            </div>
+          </div>
+          {% else %}
+          <p class="vdim churn-note">
+            ⏳ Rank-hold history is still accumulating
+            ({{ rt.samples }} snapshot{{ "s" if rt.samples != 1 }} over {{ rt.tracking_label }}).
+            Exact “held rank for N hours” needs ≥2 snapshots — the recorder samples every
+            ~{{ rt.interval_label }}, so this fills in shortly. Registration tenure below is
+            already live on-chain data.
+          </p>
+          {% endif %}
+          {% if rt.members %}
+          <div class="rt-table-wrap">
+            <table class="rt-table">
+              <thead>
+                <tr>
+                  <th class="num">Rank</th>
+                  <th>Hotkey</th>
+                  <th title="Coldkey (owner wallet) — repeats across ranks reveal one operator holding several top spots">Coldkey</th>
+                  <th title="Axon IP — repeats across ranks reveal one operator holding several top spots">IP</th>
+                  <th class="num" title="Continuous time in the top-{{ rt.top_n }} from recorded snapshots">Held rank</th>
+                  <th class="num" title="On-chain tenure since the hotkey registered (block_at_registration)">Registered</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for m in rt.members %}
+                <tr>
+                  <td class="num mono">{{ m.rank }}</td>
+                  <td class="mono mrd-hotkey ck-cell" title="{{ m.hotkey }}"><span class="ck-val">{{ m.hotkey_short }}</span>{{ copybtn(m.hotkey, "hotkey") }}</td>
+                  <td class="mono ck-cell" title="{{ m.coldkey }}{% if m.coldkey_count > 1 %} · shared by {{ m.coldkey_count }} miners{% endif %}"><span class="ck-val">{{ m.coldkey_short or "—" }}{% if m.coldkey_count > 1 %} <span class="vdim">×{{ m.coldkey_count }}</span>{% endif %}</span>{{ copybtn(m.coldkey) }}</td>
+                  <td class="mono" title="{{ m.ip }}{% if m.ip_count > 1 %} · shared by {{ m.ip_count }} miners{% endif %}">{{ m.ip or "—" }}{% if m.ip_count > 1 %} <span class="vdim">×{{ m.ip_count }}</span>{% endif %}</td>
+                  <td class="num mono">{{ m.hold_label }}</td>
+                  <td class="num mono">{{ m.reg_label }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
           </div>
           {% endif %}
-        </section>
-
-        <section class="card">
-          <h2>Economics</h2>
-          <dl class="kv">
-            <dt>Reg fee (now)</dt>
-            <dd class="mono {% if r.is_full %}danger{% endif %}">
-              {{ "%.6f"|format(r.burn_tao) }} τ
-              {% if r.is_full %}<span class="full-tag">FULL</span>{% endif %}
-            </dd>
-            <dt>Fee min / max</dt>
-            <dd class="mono">{{ "%.6f"|format(r.min_burn_tao) }} τ → {{ "%.4f"|format(r.max_burn_tao) }} τ</dd>
-            <dt>Reg demand</dt>
-            <dd class="mono">
-              {% if burn_demand_pct is not none %}
-                {% set bar_filled = (burn_demand_pct / 5)|round(0, "floor")|int %}
-                [{% for i in range(20) %}{% if i < bar_filled %}█{% else %}░{% endif %}{% endfor %}]
-                {{ "%.1f"|format(burn_demand_pct) }}% of max
-              {% else %}<span class="vdim">—</span>{% endif %}
-            </dd>
-            <dt>Burn reg</dt>    <dd>{{ yn(r.burn_registration_allowed) }}</dd>
-            <dt>PoW reg</dt>     <dd>{{ yn(r.pow_registration_allowed) }}</dd>
-            <dt>PoW difficulty</dt><dd class="mono">{{ val(r.difficulty) }}</dd>
-            <dt>UID slots</dt>
-            <dd class="mono {% if r.is_full %}danger{% endif %}">
-              {{ r.subnetwork_n }} / {{ r.max_n }}
-              <span class="vdim">({{ r.slots_free }} free)</span>
-            </dd>
-            <dt>Validator max</dt><dd class="mono">{{ val(r.max_validators) }}</dd>
-            <dt>Pool TAO</dt>    <dd class="mono">{{ "{:,.4f}".format(r.tao_in) }} τ</dd>
-            <dt>Pool α</dt>      <dd class="mono">{{ "{:,.4f}".format(r.alpha_in) }}</dd>
-            <dt>Price</dt>       <dd class="mono">{{ "%.6f"|format(r.price) }} τ/α</dd>
-            <dt>Emission/day</dt><dd class="mono ok">{{ "{:,.4f}".format(r.emission_per_day) }} τ</dd>
-            <dt>Emission/block</dt><dd class="mono">{{ "%.6f"|format(r.emission_per_block) }} τ</dd>
-            <dt>Age</dt>         <dd class="mono">{{ "%.1f"|format(r.age_days) }} days</dd>
-          </dl>
-        </section>
-
-        <section class="card">
-          <h2>Reward distribution</h2>
-          <dl class="kv">
-            <dt>Shape</dt>        <dd>{{ r.reward_shape }}</dd>
-            <dt>Active miners</dt><dd class="mono">{{ val(r.active_miners) }}</dd>
-            <dt>Top-1 share</dt>  <dd class="mono">{{ pct(r.top1_share) }}</dd>
-            <dt>Top-5 share</dt>  <dd class="mono">{{ pct(r.top5_share) }}</dd>
-            <dt>Top-10 share</dt> <dd class="mono">{{ pct(r.top10_share) }}</dd>
-            <dt>Top-50 share</dt> <dd class="mono">{{ pct(r.top50_share) }}</dd>
-            <dt>Gini</dt>
-            <dd class="mono">
-              {% if r.incentive_gini is none %}<span class="vdim">—</span>
-              {% else %}{{ "%.3f"|format(r.incentive_gini) }}
-                <span class="vdim" style="font-size:11px;">&nbsp;0 = equal · 1 = winner-takes-all</span>
-              {% endif %}
-            </dd>
-          </dl>
-        </section>
-
-        {% if emission_split %}
-        <section class="card emission-split-card">
-          <h2>
-            Emission split
-            <span class="emission-split-sub vdim">
-              of {{ "%.2f"|format(emission_split.emission_per_day_tao) }} τ/day
-              · owner-cut from chain ({{ emission_split.owner_cut_source }})
-            </span>
-          </h2>
-
-          <div class="esp-bar" title="owner {{ emission_split.owner_pct }}% · validators {{ emission_split.validators_pct }}% · miners {{ emission_split.miners_pct }}%">
-            <span class="esp-seg esp-owner"
-                  style="width: {{ emission_split.owner_pct }}%;"
-                  data-label="owner"></span>
-            <span class="esp-seg esp-validators"
-                  style="width: {{ emission_split.validators_pct }}%;"
-                  data-label="validators"></span>
-            <span class="esp-seg esp-miners"
-                  style="width: {{ emission_split.miners_pct }}%;"
-                  data-label="miners"></span>
-          </div>
-
-          <table class="esp-table">
-            <thead>
-              <tr><th>Bucket</th><th class="num">Share</th><th class="num">τ / day</th></tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><span class="esp-dot esp-dot-owner"></span> Owner</td>
-                <td class="num mono">{{ "%.2f"|format(emission_split.owner_pct) }}%</td>
-                <td class="num mono">{{ "%.4f"|format(emission_split.owner_tao_day) }}</td>
-              </tr>
-              <tr>
-                <td><span class="esp-dot esp-dot-validators"></span> Validators</td>
-                <td class="num mono">{{ "%.2f"|format(emission_split.validators_pct) }}%</td>
-                <td class="num mono">{{ "%.4f"|format(emission_split.validators_tao_day) }}</td>
-              </tr>
-              <tr>
-                <td><span class="esp-dot esp-dot-miners"></span> Miners</td>
-                <td class="num mono">{{ "%.2f"|format(emission_split.miners_pct) }}%</td>
-                <td class="num mono">{{ "%.4f"|format(emission_split.miners_tao_day) }}</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <div class="esp-foot vdim">
-            owner&nbsp;= SubnetOwnerCut / 65535 ({{ emission_split.owner_cut_u16 }}/65535)
-            · validators&nbsp;= (1−owner)&nbsp;·&nbsp;κ ({{ emission_split.kappa_u16 }}/65535 = {{ "%.2f"|format(emission_split.kappa_pct) }}%)
-            · miners&nbsp;= remainder
+          <div class="vdim ranktenure-foot">
+            {% if rt.tracking_since_label %}
+            Rank tracking since {{ rt.tracking_since_label }}.
+            {% endif %}
+            “Registered” = on-chain tenure (real now); “Held rank” = continuous time in the
+            top-{{ rt.top_n }} from snapshots sampled every ~{{ rt.interval_label }}.
           </div>
         </section>
         {% endif %}
@@ -203,6 +234,9 @@
               {% if s.total_miner_tao_per_day %}
                 · {{ "%.2f"|format(s.total_miner_tao_per_day) }} τ/day total
               {% endif %}
+              {% if s.tempo_blocks and s.tempo_blocks > 0 %}
+                · tempo {{ s.tempo_blocks }} blocks/epoch
+              {% endif %}
               {% if miner_dist.age_seconds is not none %}
                 · {{ "%.0f"|format(miner_dist.age_seconds) }}s ago
               {% endif %}
@@ -215,7 +249,7 @@
               <span class="mrd-stat-val mono">{{ s.active_miner_uids }} / {{ s.total_miner_uids }}</span>
             </div>
             <div class="mrd-stat">
-              <span class="mrd-stat-label">Top-1 share</span>
+              <span class="mrd-stat-label">Top-1 paid emission</span>
               <span class="mrd-stat-val mono">{{ "%.1f"|format(s.top1_pct) }}%</span>
             </div>
             <div class="mrd-stat">
@@ -233,29 +267,60 @@
           </div>
 
           {% if miner_dist.miners %}
+          <div class="mrd-asof vdim" style="margin:0 0 8px 0; font-size:12px;">
+            📡 Live on-chain metagraph · captured
+            <strong>{{ miner_dist.fetched_at_iso or "—" }}</strong>
+            {% if miner_dist.age_seconds is not none %}
+              ({% if miner_dist.age_seconds < 60 %}{{ "%.0f"|format(miner_dist.age_seconds) }}s{% else %}{{ "%.0f"|format(miner_dist.age_seconds / 60) }}m{% endif %} ago){% endif %}
+            {% if miner_dist.stale %}<span class="err">· refreshing…</span>{% endif %}
+          </div>
           <div class="mrd-table-wrap">
             <table class="mrd-table">
               <thead>
                 <tr>
-                  <th class="num">#</th>
+                  <th class="num" title="Emission rank among miners (by paid α/block)">Rank</th>
                   <th class="num">UID</th>
                   <th>Hotkey</th>
-                  <th class="num">Incentive</th>
-                  <th class="num">α / day</th>
+                  <th>Coldkey</th>
+                  <th>IP</th>
+                  <th class="num" title="Metagraph incentive">Inc.</th>
+                  <th class="num" title="τ value of α/tempo at pool price">τ / tempo</th>
                   <th class="num">τ / day</th>
                   <th class="mrd-share-col">Share of miner pool</th>
                 </tr>
               </thead>
               <tbody>
+                {% if miner_dist.owner %}
+                {% set o = miner_dist.owner %}
+                <tr class="mrd-owner-row" title="Subnet owner hotkey">
+                  <td class="num mono mrd-rank">owner</td>
+                  <td class="num mono">{{ o.uid }}</td>
+                  <td class="mono mrd-hotkey ck-cell" title="{{ o.hotkey }}"><span class="ck-val">{{ o.hotkey_short }}</span>{{ copybtn(o.hotkey, "hotkey") }}</td>
+                  <td class="mono mrd-coldkey ck-cell" title="{{ o.coldkey }}"><span class="ck-val">{{ o.coldkey_short or "—" }}</span>{{ copybtn(o.coldkey) }}</td>
+                  <td class="mono mrd-ip">{{ o.ip or "—" }}</td>
+                  <td class="num mono">{{ "%.4f"|format(o.incentive) }}</td>
+                  <td class="num mono ok">
+                    {%- if o.tao_per_tempo is not none -%}{{ "%.6f"|format(o.tao_per_tempo) }}
+                    {%- else -%}<span class="vdim">—</span>{%- endif -%}
+                  </td>
+                  <td class="num mono ok">{{ "%.4f"|format(o.tao_per_day) }}</td>
+                  <td class="mrd-share-cell"><span class="vdim">owner</span></td>
+                </tr>
+                {% endif %}
                 {% for m in miner_dist.miners %}
                 {# Bar width is share normalized to top-1 so the leader fills the column. #}
                 {% set norm = (m.share_pct / s.top1_pct * 100.0) if s.top1_pct > 0 else 0 %}
-                <tr>
+                <tr class="{% if m.sybil %}mrd-sybil{% endif %}{% if m.is_mine %} mrd-mine{% endif %}{% if m.below_cutoff %} mrd-below-cutoff{% endif %}"{% if m.is_mine %} title="your hotkey ({{ m.hotkey_short }}) — rank {{ m.rank_pos }} of {{ s.total_miner_uids }}"{% elif m.sybil %} title="cluster: coldkey shared by {{ m.coldkey_count }} miners{% if m.ip_count and m.ip_count > 3 %}, IP shared by {{ m.ip_count }}{% endif %}"{% endif %}>
                   <td class="num mono mrd-rank">{{ m.rank_pos }}</td>
                   <td class="num mono">{{ m.uid }}</td>
-                  <td class="mono mrd-hotkey" title="{{ m.hotkey }}">{{ m.hotkey_short }}</td>
+                  <td class="mono mrd-hotkey ck-cell" title="{{ m.hotkey }}"><span class="ck-val">{{ m.hotkey_short }}{% if m.is_mine %} <span class="mine-tag">you</span>{% endif %}</span>{{ copybtn(m.hotkey, "hotkey") }}</td>
+                  <td class="mono mrd-coldkey ck-cell" title="{{ m.coldkey }}"><span class="ck-val">{{ m.coldkey_short or "—" }}</span>{{ copybtn(m.coldkey) }}</td>
+                  <td class="mono mrd-ip">{{ m.ip or "—" }}</td>
                   <td class="num mono">{{ "%.4f"|format(m.incentive) }}</td>
-                  <td class="num mono">{{ "%.3f"|format(m.alpha_per_day) }}</td>
+                  <td class="num mono ok">
+                    {%- if m.tao_per_tempo is not none -%}{{ "%.6f"|format(m.tao_per_tempo) }}
+                    {%- else -%}<span class="vdim">—</span>{%- endif -%}
+                  </td>
                   <td class="num mono ok">{{ "%.4f"|format(m.tao_per_day) }}</td>
                   <td class="mrd-share-cell">
                     <div class="mrd-bar">
@@ -269,7 +334,13 @@
             </table>
           </div>
           <div class="mrd-foot vdim">
-            Showing top {{ miner_dist.miners_returned }} of {{ s.total_miner_uids }} miner UIDs · ranked by paid α/block · refreshed every 5 min
+            {% if miner_dist.miners_returned >= s.total_miner_uids %}
+            Showing all {{ s.total_miner_uids }} miner UIDs
+            {% else %}
+            Showing top {{ miner_dist.miners_returned }} of {{ s.total_miner_uids }} miner UIDs
+            {% endif %}
+            · ranked by paid α/block ·
+            α/τ per tempo = current rate × subnet tempo ({{ s.tempo_blocks or "?" }} blocks) · refreshed every 5 min
           </div>
           {% else %}
           <p class="vdim">No miner emissions in current epoch (subnet may be too new or fully validator-only).</p>
@@ -295,7 +366,7 @@
             function poll() {
               tries++;
               if (status) status.textContent = " (try " + tries + ")";
-              fetch("/api/miner-rewards/" + netuid + "?limit=30")
+              fetch("/api/miner-rewards/" + netuid + "?limit=512")
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (d) {
                   if (d && !d.error && d.miners && d.miners.length) {
@@ -318,23 +389,6 @@
           {% endif %}
         </section>
         {% endif %}
-
-        <section class="card">
-          <h2>Hyperparameters (chain)</h2>
-          <dl class="kv kv-2col">
-            <dt>rho</dt>              <dd class="mono">{{ val(r.rho) }}</dd>
-            <dt>kappa</dt>            <dd class="mono">{% if r.kappa %}{{ r.kappa }} <span class="vdim">({{ "%.1f"|format(r.kappa / 65535 * 100) }}%)</span>{% else %}<span class="vdim">—</span>{% endif %}</dd>
-            <dt>alpha_high</dt>       <dd class="mono">{{ val(r.alpha_high) }}</dd>
-            <dt>alpha_low</dt>        <dd class="mono">{{ val(r.alpha_low) }}</dd>
-            <dt>sigmoid_steepness</dt><dd class="mono">{{ val(r.alpha_sigmoid_steepness) }}</dd>
-            <dt>liquid_alpha</dt>     <dd>{{ yn(r.liquid_alpha_enabled) }}</dd>
-            <dt>immunity_period</dt>  <dd class="mono">{{ val(r.immunity_period) }} blocks</dd>
-            <dt>tempo</dt>            <dd class="mono">{{ val(r.tempo) }} blocks/cycle</dd>
-            <dt>yuma_version</dt>     <dd class="mono">{{ val(r.yuma_version) }}</dd>
-            <dt>commit_reveal</dt>    <dd>{{ yn(r.commit_reveal_enabled) }}</dd>
-            <dt>weights_rate_limit</dt><dd class="mono">{{ val(r.weights_rate_limit) }}</dd>
-          </dl>
-        </section>
 
       </div><!-- /detail-main -->
 
@@ -406,7 +460,7 @@
             <li class="watch-hk-row">
               <div class="watch-hk-top">
                 {% if w.name %}<span class="watch-hk-name">{{ w.name }}</span>{% endif %}
-                <span class="mono watch-hk-addr" title="{{ w.ss58 }}">{{ w.hotkey_short }}</span>
+                <span class="mono watch-hk-addr" title="{{ w.ss58 }}">{{ w.hotkey_short }}</span>{{ copybtn(w.ss58, "hotkey") }}
               </div>
               {% if w.error %}
               <div class="watch-hk-status danger">{{ w.error }}</div>
@@ -430,6 +484,12 @@
                 <dd class="mono">{{ "%.3f"|format(m.share_pct) }}%</dd>
                 <dt>τ / day</dt>
                 <dd class="mono ok">{{ "%.4f"|format(m.tao_per_day) }}</dd>
+                {% if m.alpha_per_tempo is not none and m.tao_per_tempo is not none %}
+                <dt>α / tempo</dt>
+                <dd class="mono">{{ "%.5f"|format(m.alpha_per_tempo) }}</dd>
+                <dt>τ / tempo</dt>
+                <dd class="mono ok">{{ "%.6f"|format(m.tao_per_tempo) }}</dd>
+                {% endif %}
                 <dt>Incentive</dt>
                 <dd class="mono">{{ "%.4f"|format(m.incentive) }}</dd>
                 <dt>Trust</dt>
@@ -440,6 +500,35 @@
               {% elif w.registered and w.metrics_error %}
               <div class="watch-hk-metrics-msg vdim">{{ w.metrics_error }}</div>
               {% endif %}
+
+              {% set ck = w.coldkey_name or "<coldkey>" %}
+              {% set reg_cmd = "btcli subnet register --netuid " ~ r.netuid ~ " --wallet.name " ~ ck ~ " --wallet.hotkey " ~ (w.name or "<hotkey>") ~ " --subtensor.network finney" %}
+              {% set bal_cmd = "btcli wallet balance --wallet.name " ~ ck ~ " --subtensor.network finney" %}
+              <details class="register-box">
+                <summary class="register-btn">{% if w.registered %}Register cmds ↗{% else %}Register on sn{{ r.netuid }} ↗{% endif %}</summary>
+                <div class="register-cmds">
+                  <p class="vdim register-cmds-note">
+                    Commands to run yourself — needs <code>btcli</code> and the wallet on your machine.
+                    Subnetscope only shows them, it never runs anything. Current reg fee ≈
+                    <span class="mono">{{ "%.4f"|format(r.burn_tao) }} τ</span>.
+                  </p>
+                  <div class="cmd-line"><code>{{ bal_cmd }}</code>{{ copybtn(bal_cmd, "command") }}</div>
+                  <div class="cmd-line"><code>{{ reg_cmd }}</code>{{ copybtn(reg_cmd, "command") }}</div>
+                  <p class="vdim register-cmds-foot">
+                    {% if w.coldkey_name %}
+                      Coldkey <code>{{ w.coldkey_name }}</code> auto-filled (owns this hotkey on-chain).
+                    {% elif w.coldkey_ss58 %}
+                      Owner coldkey on-chain is <span class="mono">{{ w.coldkey_short }}</span> —
+                      use its local wallet name for <code>--wallet.name</code>.
+                    {% else %}
+                      Replace <code>&lt;coldkey&gt;</code> with your wallet name.
+                    {% endif %}
+                    <code>--wallet.hotkey</code> is the local hotkey name under
+                    <code>~/.bittensor/wallets/</code>{% if w.name %} (config name <code>{{ w.name }}</code> shown){% endif %}.
+                  </p>
+                </div>
+              </details>
+
               {% if w.note %}<div class="watch-hk-note vdim">{{ w.note }}</div>{% endif %}
             </li>
             {% endfor %}
@@ -458,11 +547,6 @@
               <span class="score-fill" style="width:{{ score_breakdown.score }}%"></span>
             </div>
           </div>
-          {% if score_breakdown.why %}
-          <ul class="score-why">
-            {% for w in score_breakdown.why %}<li>{{ w }}</li>{% endfor %}
-          </ul>
-          {% endif %}
           <dl class="kv kv-compact">
             <dt>GPU friction</dt>  <dd class="mono">{{ "%.2f"|format(score_breakdown.gpu) }}</dd>
             <dt>Top-1</dt>        <dd class="mono">{{ "%.2f"|format(score_breakdown.top1) }}</dd>
@@ -490,7 +574,7 @@
               <canvas id="spark-emission" class="spark-canvas"></canvas>
             </div>
             <div class="spark-item">
-              <div class="spark-label">top-1 share <span class="spark-now mono" id="now-top1">—</span></div>
+              <div class="spark-label">top-1 miner incentive % <span class="spark-now mono" id="now-top1">—</span></div>
               <canvas id="spark-top1" class="spark-canvas"></canvas>
             </div>
             <div class="spark-item">
@@ -509,9 +593,21 @@
 
     </div><!-- /detail-layout -->
 
-  </main>
+  </main><!-- /tab-info -->
 
-  <footer class="footnote">subnet {{ r.netuid }} · live data from chain at block {{ head_block }}</footer>
+  <main class="page tab-panel" id="tab-readme" hidden>
+    <section class="card readme-card" id="readme-card"
+             data-netuid="{{ r.netuid }}" data-repo="{{ r.github_repo or '' }}">
+      <div class="readme-head">
+        <h2>Readme <span class="vdim churn-sub">from the subnet's GitHub repo</span></h2>
+        {% if r.github_repo %}
+        <a class="readme-src vdim mono" href="{{ r.github_repo }}" target="_blank" rel="noopener">{{ r.github_repo }} ↗</a>
+        {% endif %}
+      </div>
+      <div id="readme-status" class="readme-status vdim">Loading README…</div>
+      <div id="readme-content" class="readme-content markdown-body"></div>
+    </section>
+  </main><!-- /tab-readme -->
 
   <script src="/static/app.js?v={{ asset_v }}"></script>
   <script>
@@ -682,9 +778,24 @@
 
     /* ── live polling ── */
     var lastLiveV = null, lastLiveTs = null;
+    var livePollTimer = null;
+
+    function dedupeBurnPts() {
+      if (burnPts.length < 2) return;
+      burnPts.sort(function(a, b) { return a.t - b.t; });
+      var out = [burnPts[0]];
+      for (var i = 1; i < burnPts.length; i++) {
+        if (burnPts[i].t === out[out.length - 1].t) {
+          out[out.length - 1] = burnPts[i];
+        } else {
+          out.push(burnPts[i]);
+        }
+      }
+      burnPts = out;
+    }
 
     function pollLive() {
-      fetch("/api/burn-live/" + netuid)
+      return fetch("/api/burn-live/" + netuid)
         .then(function(r) { return r.ok ? r.json() : null; })
         .then(function(d) {
           if (!d) return;
@@ -701,24 +812,26 @@
             if (burnPts.length === 0 || isNew) {
               burnPts.push({ t: ts, v: v });
               if (burnPts.length > 300) burnPts = burnPts.slice(-300);
-            } else {
+            } else if (burnPts.length > 0) {
               burnPts[burnPts.length - 1].t = ts;
+              burnPts[burnPts.length - 1].v = v;
             }
           }
+          dedupeBurnPts();
         }).catch(function() {});
     }
 
     /* ── history + sparklines ── */
     function loadHistory() {
-      fetch("/api/history/" + netuid + "?hours=24")
+      return fetch("/api/history/" + netuid + "?hours=24")
         .then(function(r) { return r.ok ? r.json() : null; })
         .then(function(d) {
-          if (!d || !d.points) return;
+          if (!d || !d.points) return pollLive();
           var raw = d.points;
 
           var hist = raw.filter(function(p) { return p.burn_tao != null; })
                        .map(function(p) { return { t: p.ts, v: p.burn_tao }; });
-          if (hist.length) burnPts = hist;
+          if (hist.length) burnPts = hist.slice();
 
           function series(field, mul) {
             mul = mul || 1;
@@ -746,14 +859,81 @@
           window.snDrawSparkline("spark-top1",     top1,   "#fbbf24");
           window.snDrawSparkline("spark-miners",   miners, "#a5b4fc");
           window.snDrawSparkline("spark-slots",    slots,  "#67e8f9");
-        }).catch(function() {});
+          return pollLive();
+        })
+        .then(function() {
+          dedupeBurnPts();
+          if (livePollTimer) clearInterval(livePollTimer);
+          livePollTimer = setInterval(pollLive, 12000);
+        })
+        .catch(function() { return pollLive(); });
     }
 
-    loadHistory();
-    pollLive();
-    setInterval(pollLive, 12000);
+    loadHistory().then(function() { drawChart(); }).catch(function() { drawChart(); });
     drawChart();
   })();
   </script>
+
+  <script>
+  /* ═══ Info / Readme tabs (lazy-load README from GitHub) ═══ */
+  (function () {
+    "use strict";
+    var tabs   = Array.prototype.slice.call(document.querySelectorAll(".tab-btn"));
+    var panels = { info: document.getElementById("tab-info"),
+                   readme: document.getElementById("tab-readme") };
+    var readmeLoaded = false;
+
+    function loadReadme() {
+      if (readmeLoaded) return;
+      readmeLoaded = true;
+      var card    = document.getElementById("readme-card");
+      var statusEl= document.getElementById("readme-status");
+      var contentEl=document.getElementById("readme-content");
+      if (!card) return;
+      var netuid = card.dataset.netuid;
+      var repo   = (card.dataset.repo || "").trim();
+      if (!repo) {
+        statusEl.textContent = "No GitHub repo is set for this subnet.";
+        return;
+      }
+      statusEl.textContent = "Loading README from GitHub…";
+      fetch("/api/readme/" + netuid, { cache: "no-store" })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d || d.error || !d.html) {
+            statusEl.textContent = (d && d.error) ? ("Couldn't load README: " + d.error)
+                                                  : "No README found in this repo.";
+            return;
+          }
+          statusEl.hidden = true;
+          contentEl.innerHTML = d.html;
+        })
+        .catch(function (e) {
+          statusEl.textContent = "Couldn't load README: " + (e.message || e);
+        });
+    }
+
+    function activate(name) {
+      tabs.forEach(function (b) {
+        var on = b.dataset.tab === name;
+        b.classList.toggle("active", on);
+        b.setAttribute("aria-selected", on ? "true" : "false");
+      });
+      Object.keys(panels).forEach(function (k) {
+        if (panels[k]) panels[k].hidden = (k !== name);
+      });
+      if (name === "readme") loadReadme();
+      try { history.replaceState(null, "", "#" + name); } catch (e) {}
+    }
+
+    tabs.forEach(function (b) {
+      b.addEventListener("click", function () { activate(b.dataset.tab); });
+    });
+    if (location.hash === "#readme") activate("readme");
+  })();
+  </script>
+
+  {% include "_tools.html" %}
+  {% include "_footer.html" %}
 </body>
 </html>

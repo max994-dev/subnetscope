@@ -1,6 +1,6 @@
 # Subnet 5 — Hone
 
-> Auto-analyzed: 2026-05-08 06:05 PDT · easy-entry score: 37.5/100 · refreshes hourly
+> Auto-analyzed: 2026-06-29 21:55 EEST · easy-entry score: 42.0/100 · refreshes hourly
 
 *This analysis is auto-generated from live chain data. It updates every hour.
 For hand-curated notes, check the Bittensor Discord or the subnet's own docs.*
@@ -11,34 +11,33 @@ For hand-curated notes, check the Bittensor Discord or the subnet's own docs.*
 |---|---|
 | Category | data |
 | GPU need | none |
-| Reward shape | winner |
-| Active miners | 1 |
+| Reward shape | ? |
+| Active miners | — |
 | UID slots | 256/256 (FULL) |
 | Burn fee | 0.000500 τ `[░░░░░░░░░░░░░░░░░░░░]` 0.0% of max |
 | Burn min / max | 0.000500 τ → 100.0000 τ |
-| Emission / day | 211.9228 τ |
-| Top-1 share | 100.0% |
-| Liquidity (TAO in) | 39,494.6 τ |
-| Price (τ/α) | 0.019622 |
-| Age | 784 days |
+| Emission / day | 104.0358 τ |
+| Top-1 share | — |
+| Liquidity (TAO in) | 34,951.2 τ |
+| Price (τ/α) | 0.014449 |
+| Age | 836 days |
 
 
-## Easy-entry score: 38 / 100  🔴 low
+## Easy-entry score: 42 / 100  🟡 medium
 
 - no/low GPU (none)
-- top1 takes 100% (winner-take-all)
 - subnet is FULL (eviction war)
 - cheap burn fee 0.0005 τ
 
-| Component | Score |
+| Component | Points |
 |---|---|
-| GPU friction | 1.0 / 20 |
-| Decentralization (top-1) | 0.0 / 20 |
-| Active miners | 0.0 / 15 |
-| Free slots | 0.0 / 15 |
-| Burn fee | 1.0 / 15 |
-| Liquidity | 0.2 / 10 |
-| Emission | 0.3 / 5 |
+| GPU friction | 22.0 / 22 |
+| Decentralization (top-1) | 6.0 / 20 |
+| Active miners | 0.0 / 16 |
+| Free slots | 0.0 / 13 |
+| Burn fee | 11.0 / 11 |
+| Liquidity | 1.7 / 10 |
+| Emission | 1.3 / 8 |
 
 ## What is known about this category
 
@@ -56,20 +55,20 @@ Reward shape is not yet categorised. Check the subnet's incentive mechanism docs
 
 ✅ no paid API keys required · 💻 no GPU required · ℹ️ baseline estimate (check repo to verify)
 
-**Monthly recurring:** ~$35 – $320 · **One-time setup:** ~$0.15 – $0.18
+**Monthly recurring:** ~$15 – $120 · **One-time setup:** ~$0.10 – $0.13
 
 ### Monthly costs
 
 | Item | Required | USD / month | Notes |
 |---|:-:|---|---|
 | Hosting / VPS | ✓ | $5.00 – $20 | VPS (2 vCPU / 4 GB RAM, e.g. Hetzner CPX21) |
-| LLM API (OpenAI / Anthropic / OpenRouter) | — | $30 – $300 | optional if you run a local model; mandatory on a few (check env.example in the repo) |
+| Data sources (proxies, web APIs) | — | $10 – $100 | residential proxies / paid API access for scraping pipelines |
 
 ### One-time costs
 
 | Item | Required | USD | Notes |
 |---|:-:|---|---|
-| Registration burn fee (one-time per UID) | ✓ | $0.15 – $0.18 | 0.0005 τ · @ $307.36/τ · includes ~20% buffer for fee jitter |
+| Registration burn fee (one-time per UID) | ✓ | $0.10 – $0.13 | 0.0005 τ · @ $209.12/τ · includes ~20% buffer for fee jitter |
 
 > Estimates are baseline ranges from the subnet's category and GPU need; check the subnet's `env.example` / README for specific API key requirements.
 

@@ -1,0 +1,649 @@
+{# Shared header tools: Wallet + Find-by-IP/coldkey modals and their JS. #}
+{# Included on every page (gated by show_tools) so the header behaves identically. #}
+  <!-- ═══ Wallet (read-only coldkey) modal ═══ -->
+  <div id="wallet-modal" class="modal" aria-hidden="true" role="dialog" aria-labelledby="wallet-modal-title">
+    <div class="modal-backdrop" data-close="1"></div>
+    <div class="modal-panel" role="document">
+      <header class="modal-header">
+        <h2 id="wallet-modal-title">Coldkey wallet <span class="vdim">— read-only</span></h2>
+        <button class="modal-close" data-close="1" aria-label="Close">&times;</button>
+      </header>
+
+      <div class="modal-body">
+        <div class="wallet-picker">
+          <label class="wallet-picker-label" for="wallet-select">Coldkey</label>
+          <div class="wallet-picker-row">
+            <select id="wallet-select" class="wallet-select">
+              {% if not coldkey_entries %}
+              <option value="" disabled selected>No coldkeys configured</option>
+              {% else %}
+              <option value="" disabled selected>— pick a coldkey —</option>
+              {% for e in coldkey_entries %}
+              <option value="{{ e.ss58 }}" data-name="{{ e.name }}">
+                {{ e.name or "unnamed" }}{% if e.note %} — {{ e.note }}{% endif %}
+              </option>
+              {% endfor %}
+              {% endif %}
+            </select>
+            {% if coldkey_allow_adhoc %}
+            <input type="text" id="wallet-ss58-input" class="wallet-ss58-input"
+                   placeholder="…or paste any SS58 (5Fxxxx…)" autocomplete="off">
+            {% endif %}
+            <button id="wallet-load-btn" class="btn primary">Load</button>
+            <button id="wallet-refresh-btn" class="btn" title="Force re-query the chain (bypasses 60s cache)">
+              ↻
+            </button>
+          </div>
+          <div class="vdim wallet-picker-hint">
+            Only the public SS58 is queried. No private keys, mnemonics, or
+            passwords are ever read.
+            {% if not coldkey_entries %}
+              Add wallets under <code>coldkeys.entries</code> in <code>config.yaml</code>.
+            {% endif %}
+          </div>
+        </div>
+
+        <div id="wallet-content" class="wallet-content" hidden>
+          <section class="wallet-summary">
+            <div class="wallet-stat">
+              <div class="wallet-stat-label">Free TAO</div>
+              <div class="wallet-stat-value mono" id="wallet-free-tao">—</div>
+            </div>
+            <div class="wallet-stat">
+              <div class="wallet-stat-label">Staked value</div>
+              <div class="wallet-stat-value mono" id="wallet-staked-tao">—</div>
+            </div>
+            <div class="wallet-stat highlight">
+              <div class="wallet-stat-label">Total portfolio</div>
+              <div class="wallet-stat-value mono" id="wallet-total-tao">—</div>
+              <div class="wallet-stat-sub mono vdim" id="wallet-total-usd">—</div>
+            </div>
+            <div class="wallet-stat">
+              <div class="wallet-stat-label">Positions</div>
+              <div class="wallet-stat-value mono" id="wallet-position-count">—</div>
+              <div class="wallet-stat-sub vdim">across subnets</div>
+            </div>
+          </section>
+
+          <div class="wallet-meta vdim">
+            <span id="wallet-ss58-display" class="mono"></span>
+            <span class="sep">·</span>
+            <span>updated <span id="wallet-updated" class="mono">—</span></span>
+            <span id="wallet-stale-tag" class="stale-tag" hidden>stale</span>
+          </div>
+
+          <div class="wallet-positions-wrap">
+            <table class="wallet-table">
+              <thead>
+                <tr>
+                  <th class="right">UID</th>
+                  <th>Subnet</th>
+                  <th>Hotkey</th>
+                  <th class="right">Stake (α)</th>
+                  <th class="right">Price</th>
+                  <th class="right">Value (τ)</th>
+                  <th class="right">% port</th>
+                </tr>
+              </thead>
+              <tbody id="wallet-positions"></tbody>
+            </table>
+            <div id="wallet-empty" class="vdim wallet-empty" hidden>
+              No stake positions or registered hotkeys found for this coldkey.
+            </div>
+          </div>
+
+          <div id="wallet-hk-chart-wrap" class="wallet-hk-chart-wrap" hidden>
+            <h3>Stake value (τ) by hotkey over time</h3>
+            <canvas id="wallet-hk-chart" width="640" height="200"></canvas>
+            <p class="vdim" style="font-size:10px; margin-top:4px;">
+              Local history from this machine when you load a coldkey (≥5 min apart; force ↻ adds a point).
+            </p>
+          </div>
+        </div>
+
+        <div id="wallet-error" class="wallet-error" hidden></div>
+        <div id="wallet-loading" class="wallet-loading vdim" hidden>Querying chain…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Account lookup (coldkey / IP → registrations) modal ═══ -->
+  <div id="lookup-modal" class="modal" aria-hidden="true" role="dialog" aria-labelledby="lookup-modal-title">
+    <div class="modal-backdrop" data-close="1"></div>
+    <div class="modal-panel" role="document">
+      <header class="modal-header">
+        <h2 id="lookup-modal-title">Find registrations <span class="vdim">— by coldkey or IP</span></h2>
+        <button class="modal-close" data-close="1" aria-label="Close">&times;</button>
+      </header>
+
+      <div class="modal-body">
+        <div class="wallet-picker">
+          <label class="wallet-picker-label" for="lookup-input">Coldkey SS58 or IPv4</label>
+          <div class="wallet-picker-row">
+            <input type="text" id="lookup-input" class="wallet-ss58-input"
+                   placeholder="5Fxxxx… (coldkey) or 1.2.3.4 (axon IP)" autocomplete="off"
+                   style="flex:1;">
+            <button id="lookup-go-btn" class="btn primary">Search</button>
+          </div>
+          <div class="vdim wallet-picker-hint">
+            Shows which subnets this account's hotkeys are registered on, and how many.
+            Coldkeys are queried live on-chain; IP search uses a cross-subnet index
+            refreshed every few minutes (only public axon data — no private keys).
+          </div>
+        </div>
+
+        <div id="lookup-content" class="wallet-content" hidden>
+          <section class="wallet-summary lookup-summary">
+            <div class="wallet-stat highlight">
+              <div class="wallet-stat-label">Subnets</div>
+              <div class="wallet-stat-value mono" id="lookup-total-subnets">—</div>
+            </div>
+            <div class="wallet-stat">
+              <div class="wallet-stat-label">Registered hotkeys</div>
+              <div class="wallet-stat-value mono" id="lookup-total-hotkeys">—</div>
+            </div>
+            <div class="wallet-stat">
+              <div class="wallet-stat-label">Registrations</div>
+              <div class="wallet-stat-value mono" id="lookup-total-regs">—</div>
+              <div class="wallet-stat-sub vdim">(hotkey × subnet)</div>
+            </div>
+          </section>
+          <div class="wallet-meta vdim">
+            <span id="lookup-query-display" class="mono"></span>
+            <span class="sep">·</span>
+            <span id="lookup-kind"></span>
+            <span id="lookup-index-age"></span>
+          </div>
+          <div id="lookup-subnets" class="lookup-subnets"></div>
+          <div id="lookup-empty" class="vdim wallet-empty" hidden>
+            No subnet registrations found for this account.
+          </div>
+        </div>
+
+        <div id="lookup-error" class="wallet-error" hidden></div>
+        <div id="lookup-loading" class="wallet-loading vdim" hidden>Searching…</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ═══ Account lookup modal (coldkey / IP → subnet registrations) ═══ */
+    (function () {
+      "use strict";
+      var modal   = document.getElementById("lookup-modal");
+      var openBtn = document.getElementById("lookup-btn");
+      if (!modal || !openBtn) return;
+
+      var input   = document.getElementById("lookup-input");
+      var goBtn   = document.getElementById("lookup-go-btn");
+      var content = document.getElementById("lookup-content");
+      var errEl   = document.getElementById("lookup-error");
+      var loadEl  = document.getElementById("lookup-loading");
+      var elSubs  = document.getElementById("lookup-total-subnets");
+      var elHks   = document.getElementById("lookup-total-hotkeys");
+      var elRegs  = document.getElementById("lookup-total-regs");
+      var elQuery = document.getElementById("lookup-query-display");
+      var elKind  = document.getElementById("lookup-kind");
+      var elAge   = document.getElementById("lookup-index-age");
+      var elList  = document.getElementById("lookup-subnets");
+      var elEmpty = document.getElementById("lookup-empty");
+      var pollTimer = null;
+
+      function open()  { modal.setAttribute("aria-hidden", "false"); modal.classList.add("open"); document.body.classList.add("modal-open"); setTimeout(function(){ input.focus(); }, 30); }
+      function close() { modal.setAttribute("aria-hidden", "true"); modal.classList.remove("open"); document.body.classList.remove("modal-open"); if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; } }
+      function showErr(m)  { content.hidden = true; loadEl.hidden = true; errEl.hidden = false; errEl.textContent = m || "Lookup failed."; }
+      function showLoad(m) { errEl.hidden = true; loadEl.hidden = false; loadEl.textContent = m || "Searching…"; }
+      function esc(s) { return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+      function escA(s){ return esc(s).replace(/"/g,"&quot;"); }
+
+      function render(d) {
+        loadEl.hidden = true;
+        if (!d || d.error) { showErr(d && d.error || "lookup failed"); return; }
+        if (d.building) {
+          showLoad("Building the cross-subnet index (first sweep ~1–2 min). Retrying…");
+          if (pollTimer) clearTimeout(pollTimer);
+          pollTimer = setTimeout(function () { run(d.query); }, 5000);
+          return;
+        }
+        errEl.hidden = true; content.hidden = false;
+        elSubs.textContent = d.total_subnets != null ? String(d.total_subnets) : "—";
+        elHks.textContent  = d.total_hotkeys != null ? String(d.total_hotkeys) : "—";
+        elRegs.textContent = d.total_registrations != null ? String(d.total_registrations) : "—";
+        elQuery.textContent = d.query || "";
+        elKind.textContent  = d.kind === "ip" ? "IP axon search" : "coldkey (live on-chain)";
+        elAge.textContent   = (d.kind === "ip" && d.index_age_label) ? (" · index " + d.index_age_label) : "";
+
+        var subs = d.subnets || [];
+        elList.innerHTML = "";
+        if (!subs.length) { elEmpty.hidden = false; return; }
+        elEmpty.hidden = true;
+        subs.forEach(function (s) {
+          var hks = (s.hotkeys || []).map(function (h) {
+            var bits = [];
+            if (h.uid != null) bits.push("uid " + h.uid);
+            if (h.role) bits.push(h.role);
+            if (h.incentive != null) bits.push("inc " + Number(h.incentive).toFixed(4));
+            if (h.tenure_label) bits.push("reg " + h.tenure_label);
+            var meta = bits.length ? " <span class='vdim'>(" + esc(bits.join(" · ")) + ")</span>" : "";
+            var cp = h.hotkey ? "<button class='copy-btn' type='button' data-copy='" +
+              escA(h.hotkey) + "' title='Copy hotkey'>⧉</button>" : "";
+            return "<li class='mono lookup-hk-li' title='" + escA(h.hotkey) + "'>" +
+              esc(h.hotkey_short || "—") + cp + meta + "</li>";
+          }).join("");
+          var card = document.createElement("div");
+          card.className = "lookup-sub-card";
+          card.innerHTML =
+            "<div class='lookup-sub-head'>" +
+              "<a class='lookup-sub-net' href='/subnet/" + s.netuid + "'>sn" + s.netuid + "</a>" +
+              "<span class='lookup-sub-name'>" + esc(s.name) + "</span>" +
+              "<span class='lookup-sub-count'>" + s.count + " hotkey" + (s.count === 1 ? "" : "s") + "</span>" +
+            "</div>" +
+            "<ul class='lookup-hk-list'>" + hks + "</ul>";
+          elList.appendChild(card);
+        });
+      }
+
+      function run(q) {
+        showLoad();
+        content.hidden = true;
+        fetch("/api/account?q=" + encodeURIComponent(q), { cache: "no-store" })
+          .then(function (r) {
+            if (!r.ok) {
+              return r.json().catch(function(){return null;}).then(function (j) {
+                throw new Error((j && j.error) || ("HTTP " + r.status));
+              });
+            }
+            return r.json();
+          })
+          .then(render)
+          .catch(function (e) { showErr(String(e.message || e)); });
+      }
+
+      function search() {
+        var q = (input.value || "").trim();
+        if (!q) { showErr("Enter a coldkey SS58 or an IPv4 address."); return; }
+        if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+        run(q);
+      }
+
+      openBtn.addEventListener("click", open);
+      modal.addEventListener("click", function (e) { if (e.target.getAttribute("data-close") === "1") close(); });
+      document.addEventListener("keydown", function (e) { if (e.key === "Escape" && modal.classList.contains("open")) close(); });
+      goBtn.addEventListener("click", search);
+      input.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); search(); } });
+    })();
+  </script>
+
+  <script>
+    /* ═══ Wallet modal (read-only coldkey balance + stake) ═══ */
+    (function () {
+      "use strict";
+      var modal     = document.getElementById("wallet-modal");
+      var openBtn   = document.getElementById("wallet-btn");
+      if (!modal || !openBtn) return;
+
+      var sel       = document.getElementById("wallet-select");
+      var input     = document.getElementById("wallet-ss58-input");
+      var loadBtn   = document.getElementById("wallet-load-btn");
+      var refreshBtn= document.getElementById("wallet-refresh-btn");
+      var content   = document.getElementById("wallet-content");
+      var errEl     = document.getElementById("wallet-error");
+      var loadingEl = document.getElementById("wallet-loading");
+
+      var elFree    = document.getElementById("wallet-free-tao");
+      var elStaked  = document.getElementById("wallet-staked-tao");
+      var elTotal   = document.getElementById("wallet-total-tao");
+      var elTotalU  = document.getElementById("wallet-total-usd");
+      var elPosCnt  = document.getElementById("wallet-position-count");
+      var elSs58Disp= document.getElementById("wallet-ss58-display");
+      var elUpdated = document.getElementById("wallet-updated");
+      var elStale   = document.getElementById("wallet-stale-tag");
+      var elPos     = document.getElementById("wallet-positions");
+      var elEmpty   = document.getElementById("wallet-empty");
+
+      var lastSs58  = null;
+      var currentColdkeyName = null;   // friendly wallet name when picked from the directory
+
+      function fmtTao(v, dp) {
+        if (v == null || isNaN(v)) return "—";
+        var d = (dp == null) ? 4 : dp;
+        return v.toLocaleString(undefined,
+                 { minimumFractionDigits: d, maximumFractionDigits: d }) + " τ";
+      }
+      function fmtAlpha(v) {
+        if (v == null || isNaN(v)) return "—";
+        if (v >= 1)    return v.toFixed(4);
+        if (v >= 0.01) return v.toFixed(5);
+        return v.toFixed(6);
+      }
+      function fmtPct(v) {
+        if (v == null || isNaN(v)) return "—";
+        return (v * 100).toFixed(2) + "%";
+      }
+      function fmtTime(ts) {
+        if (!ts) return "—";
+        return new Date(ts * 1000).toLocaleTimeString();
+      }
+      function shorten(s) {
+        if (!s || s.length < 14) return s || "—";
+        return s.slice(0, 6) + "…" + s.slice(-4);
+      }
+
+      function drawWalletHotkeyChart(ss58) {
+        var wrap = document.getElementById("wallet-hk-chart-wrap");
+        var canvas = document.getElementById("wallet-hk-chart");
+        if (!wrap || !canvas || !ss58) return;
+        fetch("/api/coldkey/" + encodeURIComponent(ss58) + "/history?hours=720")
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            if (!d || !d.points || d.points.length < 2) {
+              wrap.hidden = true;
+              return;
+            }
+            var pts = d.points;
+            var lastBh = pts[pts.length - 1].by_hotkey || {};
+            var top = Object.keys(lastBh).sort(function (a, b) {
+              return (lastBh[b] || 0) - (lastBh[a] || 0);
+            }).slice(0, 5);
+            if (!top.length) { wrap.hidden = true; return; }
+            wrap.hidden = false;
+            var COLS = ["#22d3ee", "#34d399", "#fbbf24", "#a78bfa", "#f472b6"];
+            var series = top.map(function (hk, j) {
+              return {
+                hk: hk,
+                label: shorten(hk),
+                color: COLS[j % COLS.length],
+                pts: pts.map(function (p) {
+                  var v = (p.by_hotkey && p.by_hotkey[hk]) != null ? p.by_hotkey[hk] : 0;
+                  return { t: p.ts, v: v };
+                }),
+              };
+            });
+            var w = canvas.clientWidth || 640, h = canvas.clientHeight || 200;
+            var dpr = window.devicePixelRatio || 1;
+            canvas.width = w * dpr; canvas.height = h * dpr;
+            var ctx = canvas.getContext("2d");
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, w, h);
+            var pad = { l: 52, r: 8, t: 14, b: 22 };
+            var cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+            var t0 = pts[0].ts, t1 = pts[pts.length - 1].ts;
+            var tr = Math.max(1, t1 - t0);
+            var allV = [];
+            series.forEach(function (s) { s.pts.forEach(function (p) { allV.push(p.v); }); });
+            var minV = Math.min.apply(null, allV), maxV = Math.max.apply(null, allV);
+            var rng = maxV - minV;
+            if (rng === 0) { minV -= 1e-6; maxV += 1e-6; rng = maxV - minV; }
+            minV -= rng * 0.05; maxV += rng * 0.1; rng = maxV - minV;
+            function px(t) { return pad.l + ((t - t0) / tr) * cw; }
+            function py(v) { return pad.t + (1 - (v - minV) / rng) * ch; }
+            ctx.strokeStyle = "rgba(255,255,255,0.06)";
+            ctx.lineWidth = 1;
+            for (var g = 0; g <= 3; g++) {
+              var gy = pad.t + (g / 3) * ch;
+              ctx.beginPath(); ctx.moveTo(pad.l, gy); ctx.lineTo(w - pad.r, gy); ctx.stroke();
+            }
+            series.forEach(function (s) {
+              ctx.beginPath();
+              s.pts.forEach(function (p, i) {
+                var x = px(p.t), y = py(p.v);
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+              });
+              ctx.strokeStyle = s.color;
+              ctx.lineWidth = 1.8;
+              ctx.stroke();
+            });
+            series.forEach(function (s, j) {
+              ctx.fillStyle = s.color;
+              ctx.font = "9px monospace";
+              ctx.fillText(s.label, pad.l + j * 118, h - 6);
+            });
+          })
+          .catch(function () {
+            var w2 = document.getElementById("wallet-hk-chart-wrap");
+            if (w2) w2.hidden = true;
+          });
+      }
+
+      function open() {
+        modal.setAttribute("aria-hidden", "false");
+        modal.classList.add("open");
+        document.body.classList.add("modal-open");
+      }
+      function close() {
+        modal.setAttribute("aria-hidden", "true");
+        modal.classList.remove("open");
+        document.body.classList.remove("modal-open");
+      }
+      function showErr(msg) {
+        content.hidden = true;
+        loadingEl.hidden = true;
+        errEl.hidden = false;
+        errEl.textContent = msg || "Lookup failed.";
+      }
+      function showLoading(msg) {
+        errEl.hidden = true;
+        loadingEl.hidden = false;
+        loadingEl.textContent = msg || "Querying chain…";
+      }
+
+      function render(data) {
+        loadingEl.hidden = true;
+        if (!data || data.error) { showErr(data && data.error || "lookup failed"); return; }
+        errEl.hidden = true;
+        content.hidden = false;
+
+        // Friendly wallet name for the queried coldkey, if it's in the directory.
+        currentColdkeyName = null;
+        if (sel && data.ss58) {
+          var ckOpt = sel.querySelector("option[value='" + data.ss58 + "']");
+          if (ckOpt) currentColdkeyName = ckOpt.getAttribute("data-name") || null;
+        }
+
+        elFree.textContent   = fmtTao(data.free_tao, 6);
+        elStaked.textContent = fmtTao(data.total_stake_value_tao, 6);
+        elTotal.textContent  = fmtTao(data.total_value_tao, 6);
+        elPosCnt.textContent = data.position_count != null ? String(data.position_count) : "—";
+        elSs58Disp.textContent = data.ss58 || "";
+        elUpdated.textContent  = fmtTime(data.ts);
+        elStale.hidden = !data.stale;
+
+        // Convert total to USD using whatever the ticker last cached.
+        // Fall back to refetching /api/tao-price if we don't have one.
+        var rate = window.snTaoUsdRate;
+        if (!rate) {
+          fetch("/api/tao-price").then(function (r) { return r.json(); })
+            .then(function (s) {
+              window.snTaoUsdRate = (s && s.usd) || null;
+              if (window.snTaoUsdRate) {
+                elTotalU.textContent = "≈ $" + (data.total_value_tao * window.snTaoUsdRate)
+                  .toLocaleString(undefined, { maximumFractionDigits: 2 });
+              }
+            }).catch(function () {});
+        } else {
+          elTotalU.textContent = "≈ $" + (data.total_value_tao * rate)
+            .toLocaleString(undefined, { maximumFractionDigits: 2 });
+        }
+
+        // Positions table
+        elPos.innerHTML = "";
+        var total = data.total_value_tao || 0;
+        var positions = data.positions || [];
+        if (positions.length === 0) {
+          elEmpty.hidden = false;
+        } else {
+          elEmpty.hidden = true;
+          positions.forEach(function (p) {
+            var pct = total > 0 ? (p.stake_value_tao / total) : 0;
+            var tr = document.createElement("tr");
+            if (p.registered && (!p.stake_alpha || p.stake_alpha <= 0)) {
+              tr.className = "wallet-reg-only";
+            }
+            var regTag = p.registered
+              ? " <span class='reg-tag' title='Hotkey registered on this subnet'>reg</span>"
+              : "";
+            tr.innerHTML =
+              "<td class='right mono'>" + p.netuid + "</td>" +
+              "<td><a href='/subnet/" + p.netuid + "'>" + escapeHtml(p.name) + "</a>" + regTag + "</td>" +
+              "<td class='mono wallet-hk-cell' title='" + escapeAttr(p.hotkey) + "'>" +
+                (p.hotkey_name
+                  ? "<span class='wallet-hk-name'>" + escapeHtml(p.hotkey_name) + "</span>" +
+                    "<span class='vdim wallet-hk-sub'>" + escapeHtml(p.hotkey_short || "") + "</span>"
+                  : "<span>" + escapeHtml(p.hotkey_short || "—") + "</span>") +
+                (p.hotkey ? "<button class='copy-btn' type='button' data-copy='" +
+                  escapeAttr(p.hotkey) + "' title='Copy hotkey'>⧉</button>" : "") +
+                ((p.stake_alpha && p.stake_alpha > 0) ?
+                  "<button class='convert-btn' type='button' title='Convert this α stake to τ'" +
+                    " data-alpha='" + p.stake_alpha + "'" +
+                    " data-price='" + (p.price_tao_per_alpha || 0) + "'" +
+                    " data-tin='" + (p.pool_tao_in || 0) + "'" +
+                    " data-ain='" + (p.pool_alpha_in || 0) + "'" +
+                    " data-hk='" + escapeAttr(p.hotkey || "") + "'" +
+                    " data-hkname='" + escapeAttr(p.hotkey_name || "") + "'" +
+                    " data-netuid='" + p.netuid + "'>α→τ</button>" : "") +
+              "</td>" +
+              "<td class='right mono'>" + fmtAlpha(p.stake_alpha) + "</td>" +
+              "<td class='right mono'>" + (p.netuid === 0 ? "1.000000"
+                  : (p.price_tao_per_alpha || 0).toFixed(6)) + "</td>" +
+              "<td class='right mono'>" + fmtTao(p.stake_value_tao, 6) + "</td>" +
+              "<td class='right mono'>" + fmtPct(pct) + "</td>";
+            elPos.appendChild(tr);
+          });
+        }
+        drawWalletHotkeyChart(data.ss58 || lastSs58);
+      }
+
+      function escapeHtml(s) {
+        return String(s == null ? "" : s)
+          .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      }
+      function escapeAttr(s) {
+        return escapeHtml(s).replace(/"/g, "&quot;");
+      }
+
+      function selectedSs58() {
+        var pasted = (input && input.value || "").trim();
+        if (pasted) return pasted;
+        return (sel && sel.value) || "";
+      }
+
+      function load(force) {
+        var ss58 = selectedSs58();
+        if (!ss58) { showErr("Pick a coldkey or paste an SS58 address."); return; }
+        // Quick client-side sanity check.
+        if (!/^[1-9A-HJ-NP-Za-km-z]{47,48}$/.test(ss58)) {
+          showErr("That doesn't look like a valid SS58 address."); return;
+        }
+        lastSs58 = ss58;
+        showLoading();
+        content.hidden = true;
+        var url = "/api/coldkey/" + encodeURIComponent(ss58)
+                  + (force ? "?force=1" : "");
+        fetch(url, { cache: "no-store" })
+          .then(function (r) {
+            if (!r.ok) {
+              return r.json().catch(function () { return null; })
+                .then(function (j) {
+                  throw new Error((j && j.error) || ("HTTP " + r.status));
+                });
+            }
+            return r.json();
+          })
+          .then(render)
+          .catch(function (e) { showErr(String(e.message || e)); });
+      }
+
+      // -------- wire events --------
+      openBtn.addEventListener("click", function () {
+        open();
+        // Auto-load if there's only one entry & nothing pasted.
+        if (sel && sel.options.length === 2 && !content.hidden === false) {
+          // (1 placeholder + 1 entry) → preselect & load
+          sel.selectedIndex = 1;
+          load(false);
+        }
+      });
+      modal.addEventListener("click", function (e) {
+        if (e.target.getAttribute("data-close") === "1") close();
+      });
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && modal.classList.contains("open")) close();
+      });
+      loadBtn.addEventListener("click", function () { load(false); });
+      if (refreshBtn) refreshBtn.addEventListener("click", function () { load(true); });
+      if (input) input.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); load(false); }
+      });
+      if (sel) sel.addEventListener("change", function () {
+        // If user picks from dropdown, clear the paste field so it wins.
+        if (input) input.value = "";
+        load(false);
+      });
+
+      // -------- α → τ converter (per hotkey row) --------
+      if (elPos) elPos.addEventListener("click", function (e) {
+        var btn = e.target.closest ? e.target.closest(".convert-btn") : null;
+        if (!btn) return;
+        var row = btn.closest("tr");
+        var next = row.nextElementSibling;
+        if (next && next.classList.contains("convert-detail")) {
+          next.parentNode.removeChild(next);
+          btn.classList.remove("on");
+          return;
+        }
+        var alpha  = parseFloat(btn.getAttribute("data-alpha")) || 0;
+        var price  = parseFloat(btn.getAttribute("data-price")) || 0;
+        var tin    = parseFloat(btn.getAttribute("data-tin")) || 0;
+        var ain    = parseFloat(btn.getAttribute("data-ain")) || 0;
+        var hk     = btn.getAttribute("data-hk") || "";
+        var netuid = parseInt(btn.getAttribute("data-netuid"), 10);
+        // Spot value = α × pool price (root subnet is TAO 1:1).
+        var spot = (netuid === 0) ? alpha : alpha * price;
+        // Realizable now = constant-product AMM output if you unstaked it all.
+        var realizable;
+        if (netuid === 0)   realizable = alpha;
+        else if (ain > 0)   realizable = tin * alpha / (ain + alpha);
+        else                realizable = spot;
+        var slip = spot > 0 ? (1 - realizable / spot) * 100 : 0;
+
+        // The actual on-chain action that converts this α to τ: unstake it.
+        var ckName = currentColdkeyName || "<coldkey>";
+        var hkName = btn.getAttribute("data-hkname") || "";
+        // Use the local hotkey name when we know it, else target by SS58 directly
+        // (btcli accepts --hotkey-ss58-address) — no placeholder either way.
+        var hkArg = hkName ? ("--wallet.hotkey " + hkName)
+                           : ("--hotkey-ss58-address " + hk);
+        var base = "btcli stake remove --netuid " + netuid +
+                   " --wallet.name " + ckName + " " + hkArg;
+        var cmdExact = base + " --amount " + alpha.toFixed(9) + " --subtensor.network finney";
+        var cmdAll   = base + " --unstake-all-alpha --subtensor.network finney";
+
+        var tr = document.createElement("tr");
+        tr.className = "convert-detail";
+        tr.innerHTML = "<td colspan='7'>" +
+          "<div class='convert-box'>" +
+            "<span class='cv-a mono'>" + fmtAlpha(alpha) + " α</span>" +
+            "<span class='cv-arrow'>→</span>" +
+            "<span>spot <strong class='mono'>" + fmtTao(spot, 6) + "</strong></span>" +
+            "<span class='cv-sep'>·</span>" +
+            "<span>realizable now <strong class='ok mono'>" + fmtTao(realizable, 6) + "</strong>" +
+              (slip > 0.01 ? " <span class='cv-slip'>(−" + slip.toFixed(2) + "% slippage)</span>" : "") +
+            "</span>" +
+          "</div>" +
+          "<div class='convert-cmd-label vdim'>Unstake this exact α:</div>" +
+          "<div class='cmd-line'><code>" + escapeHtml(cmdExact) + "</code>" +
+            "<button class='copy-btn' type='button' data-copy='" + escapeAttr(cmdExact) +
+            "' title='Copy unstake command'>⧉</button></div>" +
+          "<div class='convert-cmd-label vdim'>…or unstake the whole α position (no exact number — it drifts as emissions accrue):</div>" +
+          "<div class='cmd-line'><code>" + escapeHtml(cmdAll) + "</code>" +
+            "<button class='copy-btn' type='button' data-copy='" + escapeAttr(cmdAll) +
+            "' title='Copy unstake-all command'>⧉</button></div>" +
+          "<div class='convert-cmd-note vdim'>Run yourself — α→τ happens at the pool rate when you unstake." +
+            (currentColdkeyName ? "" : " Replace <code>&lt;coldkey&gt;</code> with your wallet name.") +
+            " Subnetscope never runs it.</div>" +
+          "</td>";
+        row.parentNode.insertBefore(tr, row.nextSibling);
+        btn.classList.add("on");
+      });
+    })();
+  </script>

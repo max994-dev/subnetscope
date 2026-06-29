@@ -96,7 +96,10 @@ def _baseline_items(category: str, gpu_need: str) -> list[CostItem]:
     ))
 
     # LLM API costs by category — only if the subnet's pipeline calls cloud LLMs.
-    if cat in ("text", "data", "agent"):
+    # NOTE: keys must match the real categories in categorize.CATEGORIES
+    # (llm, agent, vision, audio, data, trading, storage, compute, science,
+    # infra, other) — not made-up ones like "text"/"code"/"forecasting".
+    if cat in ("llm", "agent"):
         items.append(CostItem(
             item="LLM API (OpenAI / Anthropic / OpenRouter)",
             cost_usd_low=30, cost_usd_high=300, cadence="monthly",
@@ -104,14 +107,7 @@ def _baseline_items(category: str, gpu_need: str) -> list[CostItem]:
             note="optional if you run a local model; mandatory on a few "
                  "(check env.example in the repo)",
         ))
-    elif cat == "code":
-        items.append(CostItem(
-            item="LLM API (CodeLlama / Qwen Coder)",
-            cost_usd_low=0, cost_usd_high=100, cadence="monthly",
-            required=False,
-            note="usually a local model is competitive; cloud API is optional",
-        ))
-    elif cat == "trading" or cat == "forecasting":
+    elif cat == "trading":
         items.append(CostItem(
             item="Market data feed (optional)",
             cost_usd_low=0, cost_usd_high=200, cadence="monthly",
@@ -289,8 +285,9 @@ _SUBNET_OVERRIDES: dict[int, dict[str, Any]] = {
         ],
         "summary_notes": [
             "**Subscription required:** Chutes account (free signup, pay-per-use).",
-            "Flat reward shape (anti-Sybil): top-1 share <1% so consistent "
-            "uptime + correct deployment matter more than raw compute.",
+            "Reward shape is **highly concentrated** on-chain (see subnetscope "
+            "`top1_share` / Taostats); treat dashboard numbers as live signals, "
+            "not static marketing copy.",
         ],
         "needs_paid_api": False,
         "needs_gpu": False,

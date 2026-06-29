@@ -116,24 +116,19 @@ def gpu_need_for(category: str, netuid: int | None = None) -> str:
     return GPU_NEED_BY_CATEGORY.get(category, "?")
 
 
-def incentive_concentration(incentives: list[float]) -> dict[str, float | int]:
-    """Compute concentration metrics from a metagraph's `incentive` vector.
-
-    Returns dict with: active_miners, top1_share, top5_share, top10_share,
-    top50_share, gini. Empty dict if no positive incentives present.
-    """
-    nz = sorted((float(x) for x in incentives if float(x) > 0), reverse=True)
-    n = len(nz)
-    total = sum(nz)
+def _concentration_from_positive_incentives(nz_sorted_desc: list[float]) -> dict[str, float | int]:
+    """Internal: ``nz_sorted_desc`` = positive incentives sorted high → low."""
+    n = len(nz_sorted_desc)
+    total = sum(nz_sorted_desc)
     if n == 0 or total <= 0:
         return {}
 
+    nz = nz_sorted_desc
     top1 = nz[0] / total
     top5 = sum(nz[:5]) / total
     top10 = sum(nz[:10]) / total
     top50 = sum(nz[:50]) / total
 
-    # Gini coefficient (sorted ascending for the formula).
     asc = list(reversed(nz))
     cum = 0.0
     for i, x in enumerate(asc, 1):
@@ -149,6 +144,52 @@ def incentive_concentration(incentives: list[float]) -> dict[str, float | int]:
         "top50_share": top50,
         "gini": gini,
     }
+
+
+def incentive_concentration(incentives: list[float]) -> dict[str, float | int]:
+    """Compute concentration from the full metagraph ``incentive`` vector.
+
+    Prefer :func:`miner_incentive_concentration` for directory tables — that
+    excludes validator rows so ``top1_share`` matches “among miners”, not
+    “largest single UID (possibly a validator)”.
+    """
+    nz = sorted((float(x) for x in incentives if float(x) > 0), reverse=True)
+    return _concentration_from_positive_incentives(nz)
+
+
+def miner_incentive_concentration(
+    incentives: list[float],
+    validator_permit: list[bool] | None,
+) -> dict[str, float | int]:
+    """Concentration among **non-validator** UIDs only (typical miner view).
+
+    If ``validator_permit`` is missing or shorter than ``incentives``,
+    missing entries are treated as non-validators. If ``validator_permit``
+    is completely absent (None and no list), falls back to the full-vector
+    behaviour (same as :func:`incentive_concentration`).
+    """
+    if not incentives:
+        return {}
+    if validator_permit is None:
+        return incentive_concentration(incentives)
+
+    n_inc = len(incentives)
+    vp = list(validator_permit[:n_inc])
+    if len(vp) < n_inc:
+        vp.extend([False] * (n_inc - len(vp)))
+
+    miner_vals: list[float] = []
+    for i in range(n_inc):
+        if i < len(vp) and vp[i]:
+            continue
+        try:
+            f = float(incentives[i])
+        except (TypeError, ValueError):
+            f = 0.0
+        if f > 0:
+            miner_vals.append(f)
+    miner_vals.sort(reverse=True)
+    return _concentration_from_positive_incentives(miner_vals)
 
 
 def reward_shape_from_distribution(metrics: dict) -> str:

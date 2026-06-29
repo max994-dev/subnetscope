@@ -1,6 +1,6 @@
 # Subnet 7 — Allways
 
-> Auto-analyzed: 2026-05-08 06:05 PDT · easy-entry score: 20.4/100 · refreshes hourly
+> Auto-analyzed: 2026-06-29 21:55 EEST · easy-entry score: 26.4/100 · refreshes hourly
 
 *This analysis is auto-generated from live chain data. It updates every hour.
 For hand-curated notes, check the Bittensor Discord or the subnet's own docs.*
@@ -11,37 +11,36 @@ For hand-curated notes, check the Bittensor Discord or the subnet's own docs.*
 |---|---|
 | Category | infra |
 | GPU need | varies |
-| Reward shape | winner |
-| Active miners | 1 |
+| Reward shape | ? |
+| Active miners | — |
 | UID slots | 256/256 (FULL) |
 | Burn fee | 0.000500 τ `[░░░░░░░░░░░░░░░░░░░░]` 0.0% of max |
 | Burn min / max | 0.000500 τ → 100.0000 τ |
-| Emission / day | 37.0068 τ |
-| Top-1 share | 100.0% |
-| Liquidity (TAO in) | 7,394.6 τ |
-| Price (τ/α) | 0.004371 |
-| Age | 765 days |
+| Emission / day | 25.5804 τ |
+| Top-1 share | — |
+| Liquidity (TAO in) | 6,665.9 τ |
+| Price (τ/α) | 0.003553 |
+| Age | 817 days |
 
 
-## Easy-entry score: 20 / 100  🔴 low
+## Easy-entry score: 26 / 100  🔴 low
 
-- top1 takes 100% (winner-take-all)
 - subnet is FULL (eviction war)
 - cheap burn fee 0.0005 τ
 
-| Component | Score |
+| Component | Points |
 |---|---|
-| GPU friction | 0.4 / 20 |
-| Decentralization (top-1) | 0.0 / 20 |
-| Active miners | 0.0 / 15 |
-| Free slots | 0.0 / 15 |
-| Burn fee | 1.0 / 15 |
-| Liquidity | 0.0 / 10 |
-| Emission | 0.0 / 5 |
+| GPU friction | 8.8 / 22 |
+| Decentralization (top-1) | 6.0 / 20 |
+| Active miners | 0.0 / 16 |
+| Free slots | 0.0 / 13 |
+| Burn fee | 11.0 / 11 |
+| Liquidity | 0.3 / 10 |
+| Emission | 0.3 / 8 |
 
 ## What is known about this category
 
-Category information is limited. Check the subnet's GitHub and Discord for specifics before investing time or registration fees.
+This subnet provides infrastructure or meta-coordination for the network (registries, validation-of-validators, hashing, governance). Requirements vary widely — read the repo docs carefully.
 
 ## GPU / hardware
 
@@ -67,7 +66,7 @@ Reward shape is not yet categorised. Check the subnet's incentive mechanism docs
 
 | Item | Required | USD | Notes |
 |---|:-:|---|---|
-| Registration burn fee (one-time per UID) | ✓ | $0.15 – $0.18 | 0.0005 τ · @ $307.36/τ · includes ~20% buffer for fee jitter |
+| Registration burn fee (one-time per UID) | ✓ | $0.10 – $0.13 | 0.0005 τ · @ $209.12/τ · includes ~20% buffer for fee jitter |
 | GPU purchase (optional alternative to renting) | — | $300 – $8,000 |  |
 
 > Estimates are baseline ranges from the subnet's category and GPU need; check the subnet's `env.example` / README for specific API key requirements.

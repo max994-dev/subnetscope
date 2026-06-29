@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>sn{{ netuid }} · loading · subnetscope</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+</head>
+<body class="pending-body">
+  <main class="pending-wrap">
+    <h1 class="mono">sn{{ netuid }}</h1>
+    <p class="vdim">Subnet directory is still scanning the chain. This page will open automatically when data is ready.</p>
+    <div class="boot-progress">
+      <div class="boot-progress-bar" id="boot-bar" style="width:0%"></div>
+    </div>
+    <p class="mono boot-pct" id="boot-pct">0%</p>
+    <p class="vdim boot-phase" id="boot-phase">initialising…</p>
+    <p><a href="/">← Back to directory</a></p>
+  </main>
+  <script>
+  (function () {
+    var netuid = {{ netuid }};
+    var bar = document.getElementById("boot-bar");
+    var pctEl = document.getElementById("boot-pct");
+    var phEl = document.getElementById("boot-phase");
+    function tick() {
+      fetch("/api/health", { cache: "no-store" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (h) {
+          if (!h) return;
+          if (!h.scan_pending) {
+            window.location.href = "/subnet/" + netuid;
+            return;
+          }
+          var s = h.scan || {};
+          var p = typeof s.pct === "number" ? s.pct : 0;
+          if (bar) bar.style.width = Math.min(100, p) + "%";
+          if (pctEl) pctEl.textContent = Math.min(100, p) + "%";
+          if (phEl) phEl.textContent = (s.phase || "scan") + " · " + (s.done || 0) + "/" + (s.total || "?") + " subnets";
+        })
+        .catch(function () {});
+    }
+    tick();
+    setInterval(tick, 400);
+  })();
+  </script>
+</body>
+</html>

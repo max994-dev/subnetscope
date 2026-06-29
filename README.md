@@ -29,6 +29,8 @@ keyword classifier so you can answer questions like:
 
 ## Install
 
+**`bittensor-cli` is not enough.** Subnetscope imports the **`bittensor`** SDK (`Subtensor`, metagraph, etc.). If you only installed `bittensor-cli` while fixing another project’s packages, install the SDK too, e.g. `pip install 'bittensor>=9'` or `uv pip install -e .` from this repo.
+
 All `bt/*` projects share a **single global Python environment** at
 `~/.local/lib/python3.12/site-packages` (no `venv` activation, no
 per-project conflicts). Use the `gpip` wrapper for any `pip install`-style
@@ -271,11 +273,10 @@ chain RPC can never freeze the event loop.
   the next request picks it up (mtime cache). Subnets without a file
   show no card. See [Curated analyses](#curated-analyses) below.
 - **Alerts bell 🔔** in the header — desktop notifications + dropdown panel.
-  Polls `/api/alerts` every 15 s. Triggers:
-    * `recommended` — easy-entry score crossed the threshold (default 60)
-    * `burn-jump` — burn fee rose ≥ 1.5× vs ~1 hour ago
+  Polls `/api/alerts` every ~12 s. Triggers:
     * `slot-open` — a previously-full subnet now has free UID slots
-    * `tempo-near` — ≤ 5 blocks (~60 s) until the next emission tick
+    * `tempo-near` — ≤ 5 blocks until the next emission tick, only if a
+      configured watch hotkey is registered on that subnet
     * `new-subnet` — a netuid that was not in the local DB before
 - **Wallet modal 💰** in the header — opens a read-only view of any
   configured (or pasted) coldkey: free TAO, per-subnet alpha stake

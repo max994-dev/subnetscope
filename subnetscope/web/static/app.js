@@ -1,11 +1,11 @@
 /* subnetscope web — client-side helpers.
-   Watchlist (localStorage), alerts polling, browser notifications,
+   Bookmarks (localStorage), alerts polling, browser notifications,
    chart helpers. No build step. */
 
 (function () {
   "use strict";
 
-  // ---------------------------------------------------------------- watchlist
+  // ---------------------------------------------------------------- bookmarks (local)
   var WATCH_KEY = "subnetscope_watch_v1";
   function loadWatch() {
     try {
@@ -85,6 +85,20 @@
   }
   var seenAlerts = loadSeen();
 
+  var DESKTOP_NOTIFIED_KEY = "subnetscope_alerts_desktop_notified_v1";
+  function loadDesktopNotified() {
+    try {
+      var raw = localStorage.getItem(DESKTOP_NOTIFIED_KEY);
+      if (!raw) return new Set();
+      return new Set(JSON.parse(raw).map(String));
+    } catch (e) { return new Set(); }
+  }
+  function saveDesktopNotified(s) {
+    var arr = Array.from(s).slice(-400);
+    localStorage.setItem(DESKTOP_NOTIFIED_KEY, JSON.stringify(arr));
+  }
+  var desktopNotified = loadDesktopNotified();
+
   function ensureNotificationPermission() {
     if (!("Notification" in window)) return Promise.resolve("unsupported");
     if (Notification.permission === "granted") return Promise.resolve("granted");
@@ -95,8 +109,30 @@
   function notify(title, body, tag) {
     if (!("Notification" in window)) return;
     if (Notification.permission !== "granted") return;
-    try { new Notification(title, { body: body, tag: tag, icon: "/static/favicon.svg" }); }
-    catch (e) { /* ignore */ }
+    try {
+      new Notification(title, { body: body, tag: tag, icon: "/static/favicon.svg" });
+    } catch (e) { /* ignore */ }
+  }
+
+  function showAlertToast(lines) {
+    var el = document.getElementById("sn-alert-toast");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "sn-alert-toast";
+      el.setAttribute("role", "status");
+      el.style.cssText = [
+        "position:fixed", "bottom:20px", "right:20px", "max-width:min(380px,92vw)",
+        "z-index:99999", "padding:12px 14px", "border-radius:10px",
+        "background:rgba(30,30,35,0.96)", "border:1px solid rgba(255,255,255,0.12)",
+        "color:#e4e4e7", "font-size:13px", "line-height:1.35", "white-space:pre-wrap",
+        "box-shadow:0 8px 32px rgba(0,0,0,0.45)", "display:none",
+      ].join(";");
+      document.body.appendChild(el);
+    }
+    el.textContent = lines.join("\n");
+    el.style.display = "block";
+    if (el._hideT) clearTimeout(el._hideT);
+    el._hideT = setTimeout(function () { el.style.display = "none"; }, 10000);
   }
 
   // Compose a short, scannable headline per alert kind, leading with the
@@ -108,18 +144,17 @@
       : "(network)";
     var p = a.payload_obj || null;
     switch (a.kind) {
-      case "recommended":
-        if (p && p.score != null) return subj + " — score " + Math.round(p.score) + "/100";
-        return subj + " — recommended";
-      case "burn-jump":
-        if (p && p.ratio != null) return subj + " — burn fee " + p.ratio.toFixed(1) + "× in 1h";
-        return subj + " — burn fee jumped";
       case "slot-open":
         if (p && p.slots_free != null) return subj + " — " + p.slots_free + " UID slot(s) opened";
         return subj + " — slot opened";
       case "tempo-near":
-        if (p && p.blocks_to_tick != null) return subj + " — emission tick in " + p.blocks_to_tick + " blocks";
-        return subj + " — emission tick soon";
+        if (p && p.blocks_to_tick != null) {
+          var h = subj + " — validators send tasks in " + p.blocks_to_tick +
+                  " block" + (p.blocks_to_tick === 1 ? "" : "s");
+          if (p.watch_hotkeys) h += " (your hotkey)";
+          return h;
+        }
+        return subj + " — validators start sending tasks soon";
       case "new-subnet":
         return subj + " — new subnet appeared";
       default:
@@ -127,22 +162,47 @@
     }
   }
 
-  function renderAlerts(items) {
-    var panel = document.getElementById("alerts-list");
-    var badge = document.getElementById("alerts-badge");
-    if (!panel || !badge) return;
-    // Parse payload JSON once, attach to alert object.
+  // Friendly chip label (keeps the raw kind as the CSS class for styling).
+  function kindLabel(k) {
+    return k === "tempo-near" ? "validator tasks" : k;
+  }
+
+  function parseAlertPayloads(items) {
     items.forEach(function (a) {
       if (a.payload && !a.payload_obj) {
         try { a.payload_obj = JSON.parse(a.payload); }
         catch (e) { a.payload_obj = null; }
       }
     });
+  }
+
+  function processDesktopNotifications(items) {
+    var fresh = items.filter(function (a) { return !desktopNotified.has(String(a.id)); });
+    if (!fresh.length) return;
+    var tail = fresh.slice(-8);
+    var toastLines = [];
+    tail.forEach(function (a) {
+      desktopNotified.add(String(a.id));
+      var title = alertHeadline(a);
+      var body = a.message || "";
+      notify(title, body, "subnetscope-alert-" + a.id);
+      toastLines.push(title);
+    });
+    saveDesktopNotified(desktopNotified);
+    if (Notification.permission !== "granted" && toastLines.length) {
+      showAlertToast(toastLines);
+    }
+  }
+
+  function renderAlertsUi(items) {
+    var panel = document.getElementById("alerts-list");
+    var badge = document.getElementById("alerts-badge");
+    if (!panel || !badge) return;
     var unseen = items.filter(function (a) { return !seenAlerts.has(a.id); });
     badge.textContent = unseen.length > 0 ? String(unseen.length) : "";
     badge.classList.toggle("has", unseen.length > 0);
     if (items.length === 0) {
-      panel.innerHTML = '<div class="empty">No alerts yet. Recommendations and burn-fee jumps will show up here.</div>';
+      panel.innerHTML = '<div class="empty">No alerts yet. Open slots, validator task rounds (watch hotkeys on subnet), and new subnets will show here.</div>';
       return;
     }
     panel.innerHTML = items.slice(0, 50).map(function (a) {
@@ -154,7 +214,7 @@
       return '<div class="alert-item">' +
                '<div class="alert-row">' +
                  headlineWrapped +
-                 '<span class="kind ' + a.kind + '">' + a.kind + '</span>' +
+                 '<span class="kind ' + a.kind + '">' + kindLabel(a.kind) + '</span>' +
                '</div>' +
                '<div class="alert-msg">' + escapeHtml(a.message) + '</div>' +
                '<div class="meta">' +
@@ -162,10 +222,12 @@
                '</div>' +
              '</div>';
     }).join("");
-    // Surface new ones as desktop notifications. Title = subject + key fact.
-    unseen.slice(-5).forEach(function (a) {
-      notify(alertHeadline(a), a.message, "alert-" + a.id);
-    });
+  }
+
+  function renderAlerts(items) {
+    parseAlertPayloads(items);
+    processDesktopNotifications(items);
+    renderAlertsUi(items);
   }
 
   function escapeHtml(s) {
@@ -188,6 +250,43 @@
   document.addEventListener("DOMContentLoaded", function () {
     window.snWatch.refreshUi();
 
+    /* Ask once for desktop notifications (Chrome / Firefox / Edge). */
+    ensureNotificationPermission();
+
+    pollAlerts();
+    setInterval(pollAlerts, 12000);
+
+    /* column header sort → updates #filters input[name=sort], HTMX refreshes table */
+    function defaultOrderForKey(key) {
+      var asc = {
+        fee: 1, name: 1, netuid: 1, type: 1, category: 1, gpu: 1, reward: 1,
+        top1: 1, fullness: 1, gini: 1, price: 1,
+      };
+      return asc[key] ? "asc" : "desc";
+    }
+    document.body.addEventListener("click", function (e) {
+      var th = e.target.closest("th.sort-th[data-sort-key]");
+      if (!th) return;
+      e.preventDefault();
+      var key = th.getAttribute("data-sort-key");
+      if (!key) return;
+      var form = document.getElementById("filters");
+      if (!form) return;
+      var inp = form.querySelector('input[name="sort"]');
+      if (!inp) return;
+      var cur = (inp.value || "").trim();
+      var first = cur.split(/\s*,\s*/)[0] || "";
+      var m = first.match(/^([^:]+)(?::(asc|desc))?$/i);
+      var ck = m ? m[1].toLowerCase() : "";
+      var ord = (m && m[2]) ? m[2].toLowerCase() : defaultOrderForKey(key);
+      if (ck === key.toLowerCase()) {
+        ord = (ord === "asc") ? "desc" : "asc";
+      } else {
+        ord = defaultOrderForKey(key);
+      }
+      inp.value = key + ":" + ord;
+      inp.dispatchEvent(new Event("change", { bubbles: true }));
+    });
     var bell = document.getElementById("bell-btn");
     var panel = document.getElementById("alerts-panel");
     if (bell && panel) {
@@ -226,9 +325,6 @@
           renderAlerts(d.alerts || []);
         });
       });
-
-      pollAlerts();
-      setInterval(pollAlerts, 15000);
     }
   });
 
@@ -270,4 +366,44 @@
     ctx.lineJoin = "round";
     ctx.stroke();
   };
+})();
+
+/* ═══ Copy-to-clipboard buttons (.copy-btn[data-copy]) ═══ */
+(function () {
+  "use strict";
+  function fallbackCopy(text) {
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-1000px";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+  function flash(btn) {
+    var prev = btn.textContent;
+    btn.classList.add("copied");
+    btn.textContent = "✓";
+    setTimeout(function () {
+      btn.classList.remove("copied");
+      btn.textContent = prev;
+    }, 1100);
+  }
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest ? e.target.closest(".copy-btn") : null;
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    var text = btn.getAttribute("data-copy");
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { flash(btn); })
+        .catch(function () { fallbackCopy(text); flash(btn); });
+    } else {
+      fallbackCopy(text);
+      flash(btn);
+    }
+  });
 })();

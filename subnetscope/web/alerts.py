@@ -1,28 +1,49 @@
 """Alert evaluator. Runs after every fresh chain scan.
 
 Triggers:
-  burn-jump      burn fee >= 1.5x of the snapshot ~1h ago
-  recommended    easy_entry_score >= threshold
   slot-open      previously-full subnet now has UID slots free
-  tempo-near     <= N blocks until next emission tick
+  tempo-near     <= N blocks until the next epoch boundary, i.e. when validators
+                   start a fresh task/scoring round. Only fires if a configured
+                   watch hotkey (``hotkeys.entries`` in config) is registered on
+                   that subnet (requires chain lookup per candidate subnet).
+                   (Internal kind stays "tempo-near"; surfaced as "validator
+                   tasks" in the UI.)
   new-subnet     a netuid we have never seen before
+
+These alerts appear in the web **Alerts** panel (GET ``/api/alerts``) and
+in the 🔔 dropdown; each row links to ``/subnet/{netuid}``.
 """
 from __future__ import annotations
 
 import json
 import logging
+from typing import Any
 
+from ..config import HotkeyEntry
 from ..types import SubnetRow
-from .score import score_all
 from .state_db import StateDB
+from .watch_hotkeys import any_watch_hotkey_registered
 
 log = logging.getLogger(__name__)
 
-BURN_JUMP_RATIO = 1.50
-BURN_LOOKBACK_SECONDS = 3600
-RECOMMENDED_THRESHOLD = 60.0   # fires for top tier of easy_entry_score
+SNAPSHOT_LOOKBACK_SECONDS = 3600  # ~1h snapshot for slot-open compare
 DEDUPE_WINDOW_SECONDS = 6 * 3600
 TEMPO_NEAR_BLOCKS = 5
+TEMPO_BLOCK_SECONDS = 12  # ~Finney block time; used in alert copy / UI hints
+
+
+def tempo_blocks_to_tick(r: SubnetRow, block: int) -> int | None:
+    """Blocks until the next emission tick, or ``None`` if tempo is unknown."""
+    if not r.tempo or r.tempo <= 0:
+        return None
+    blocks_into_cycle = block % r.tempo
+    return r.tempo - blocks_into_cycle
+
+
+def is_tempo_near(r: SubnetRow, block: int) -> bool:
+    """True when within ``TEMPO_NEAR_BLOCKS`` of the next emission tick."""
+    btt = tempo_blocks_to_tick(r, block)
+    return btt is not None and 0 < btt <= TEMPO_NEAR_BLOCKS
 
 
 def _format_burn(x: float) -> str:
@@ -33,31 +54,22 @@ def _format_burn(x: float) -> str:
     return f"{x:.6f} t"
 
 
-def evaluate(db: StateDB, rows: list[SubnetRow], block: int,
-             scan_ts: int) -> int:
+def evaluate(
+    db: StateDB,
+    rows: list[SubnetRow],
+    block: int,
+    scan_ts: int,
+    *,
+    sdk_client: Any | None = None,
+    watch_hotkeys: list[HotkeyEntry] | None = None,
+) -> int:
     """Run all alert rules. Returns number of new alerts inserted."""
     new_count = 0
-    scores = score_all(rows)
+    hk_entries = list(watch_hotkeys or [])
 
     for r in rows:
         prev = db.snapshot_at_or_before(
-            r.netuid, scan_ts - BURN_LOOKBACK_SECONDS)
-
-        if prev and prev["burn_tao"] and r.recycle_tao > 0:
-            ratio = r.recycle_tao / prev["burn_tao"]
-            if ratio >= BURN_JUMP_RATIO:
-                if not db.alert_exists_recently(
-                        "burn-jump", r.netuid, DEDUPE_WINDOW_SECONDS):
-                    msg = (f"Burn fee jumped {ratio:.1f}x in 1h: "
-                           f"{_format_burn(prev['burn_tao'])} -> "
-                           f"{_format_burn(r.recycle_tao)}")
-                    if db.insert_alert(scan_ts, "burn-jump", r.netuid,
-                                       r.name, msg, json.dumps({
-                                           "old": prev["burn_tao"],
-                                           "new": r.recycle_tao,
-                                           "ratio": ratio,
-                                       })):
-                        new_count += 1
+            r.netuid, scan_ts - SNAPSHOT_LOOKBACK_SECONDS)
 
         if prev and prev["max_n"] and prev["subnetwork_n"] is not None:
             was_full = prev["subnetwork_n"] >= prev["max_n"]
@@ -73,34 +85,27 @@ def evaluate(db: StateDB, rows: list[SubnetRow], block: int,
                                        json.dumps({"slots_free": r.slots_free})):
                         new_count += 1
 
-        sb = scores.get(r.netuid)
-        if sb and sb.score >= RECOMMENDED_THRESHOLD:
-            if not db.alert_exists_recently(
-                    "recommended", r.netuid, DEDUPE_WINDOW_SECONDS):
-                why = "; ".join(sb.why[:3]) or "matches your criteria"
-                msg = f"Recommended (score {sb.score:.0f}/100): {why}"
-                if db.insert_alert(scan_ts, "recommended", r.netuid,
-                                   r.name, msg, json.dumps({
-                                       "score": sb.score,
-                                       "why": sb.why,
-                                   })):
-                    new_count += 1
-
-        if r.tempo and r.tempo > 0:
-            blocks_into_cycle = block % r.tempo
-            blocks_to_tick = r.tempo - blocks_into_cycle
-            if 0 < blocks_to_tick <= TEMPO_NEAR_BLOCKS:
-                window = max(60, r.tempo * 12)
-                if not db.alert_exists_recently("tempo-near", r.netuid, window):
-                    msg = (f"Emission tick in ~{blocks_to_tick} blocks "
-                           f"(~{blocks_to_tick * 12}s) - "
-                           f"submit weights/work now")
-                    if db.insert_alert(scan_ts, "tempo-near", r.netuid,
-                                       r.name, msg, json.dumps({
-                                           "blocks_to_tick": blocks_to_tick,
-                                           "tempo": r.tempo,
-                                       })):
-                        new_count += 1
+        blocks_to_tick = tempo_blocks_to_tick(r, block)
+        if blocks_to_tick is None or not (0 < blocks_to_tick <= TEMPO_NEAR_BLOCKS):
+            continue
+        if not hk_entries:
+            continue
+        if not any_watch_hotkey_registered(sdk_client, r.netuid, hk_entries):
+            continue
+        window = max(60, (r.tempo or 1) * TEMPO_BLOCK_SECONDS)
+        if not db.alert_exists_recently("tempo-near", r.netuid, window):
+            eta_s = blocks_to_tick * TEMPO_BLOCK_SECONDS
+            msg = (f"Validators will start sending tasks in ~{blocks_to_tick} "
+                   f"blocks (~{eta_s}s) — the next epoch begins, so validators "
+                   f"start a fresh scoring round. A watch hotkey from config is "
+                   f"registered here; keep your miner up and answering.")
+            if db.insert_alert(scan_ts, "tempo-near", r.netuid,
+                               r.name, msg, json.dumps({
+                                   "blocks_to_tick": blocks_to_tick,
+                                   "tempo": r.tempo,
+                                   "watch_hotkeys": True,
+                               })):
+                new_count += 1
 
     return new_count
 

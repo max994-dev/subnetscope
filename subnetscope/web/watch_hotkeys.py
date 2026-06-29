@@ -35,11 +35,19 @@ def registration_status_for_subnet(
     netuid: int,
     entries: list[HotkeyEntry],
     miner_rewards_svc: Any = None,
+    coldkey_dir: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return one row per configured hotkey with UID if registered on `netuid`."""
+    """Return one row per configured hotkey with UID if registered on `netuid`.
+
+    Also resolves each hotkey's owner coldkey from chain (``get_hotkey_owner``)
+    and, when that coldkey is in ``coldkey_dir`` (ss58 -> name), surfaces its
+    friendly name so the register command can be pre-filled with the real
+    wallet name instead of a ``<coldkey>`` placeholder.
+    """
     out: list[dict[str, Any]] = []
     if not entries or sdk_client is None:
         return out
+    ck_dir = coldkey_dir or {}
 
     try:
         tls_fn = getattr(sdk_client, "_thread_subtensor", None)
@@ -79,6 +87,17 @@ def registration_status_for_subnet(
             continue
         row["uid"] = uid
         row["registered"] = uid is not None
+        # Owner coldkey (works whether or not the hotkey is on THIS subnet, as
+        # long as it's been registered somewhere); match to the configured
+        # coldkey directory for a friendly wallet name.
+        try:
+            owner = sub.get_hotkey_owner(hk)
+        except Exception:  # noqa: BLE001
+            owner = None
+        owner = (str(owner).strip() if owner else "") or None
+        row["coldkey_ss58"] = owner
+        row["coldkey_short"] = _short_ss58(owner) if owner else None
+        row["coldkey_name"] = ck_dir.get(owner) if owner else None
         out.append(row)
 
     uids = [int(r["uid"]) for r in out if r.get("registered") and r.get("uid") is not None]
@@ -115,3 +134,31 @@ def registration_status_for_subnet(
         r["metrics"] = m2
 
     return out
+
+
+def any_watch_hotkey_registered(
+    sdk_client: Any,
+    netuid: int,
+    entries: list[HotkeyEntry],
+) -> bool:
+    """True if any ``hotkeys.entries`` SS58 has a UID on ``netuid`` (read-only)."""
+    if not entries or sdk_client is None:
+        return False
+    try:
+        tls_fn = getattr(sdk_client, "_thread_subtensor", None)
+        sub = tls_fn() if tls_fn is not None else getattr(sdk_client, "subtensor", None)
+    except Exception:  # noqa: BLE001
+        return False
+    if sub is None:
+        return False
+    for e in entries:
+        hk = (e.ss58 or "").strip()
+        if not hk or not is_valid_ss58(hk):
+            continue
+        try:
+            uid = sub.get_uid_for_hotkey_on_subnet(hotkey_ss58=hk, netuid=netuid)
+        except Exception:  # noqa: BLE001
+            continue
+        if uid is not None:
+            return True
+    return False

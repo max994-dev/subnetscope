@@ -1,6 +1,6 @@
 # Subnet 1 — Apex
 
-> Auto-analyzed: 2026-05-08 06:05 PDT · easy-entry score: 15.7/100 · refreshes hourly
+> Auto-analyzed: 2026-06-29 21:55 EEST · easy-entry score: 26.1/100 · refreshes hourly
 
 *This analysis is auto-generated from live chain data. It updates every hour.
 For hand-curated notes, check the Bittensor Discord or the subnet's own docs.*
@@ -11,38 +11,37 @@ For hand-curated notes, check the Bittensor Discord or the subnet's own docs.*
 |---|---|
 | Category | llm |
 | GPU need | heavy |
-| Reward shape | winner |
-| Active miners | 3 |
+| Reward shape | peak |
+| Active miners | 4 |
 | UID slots | 256/256 (FULL) |
 | Burn fee | 0.000500 τ `[░░░░░░░░░░░░░░░░░░░░]` 0.0% of max |
 | Burn min / max | 0.000500 τ → 100.0000 τ |
-| Emission / day | 74.7705 τ |
-| Top-1 share | 93.4% |
-| Liquidity (TAO in) | 28,634.9 τ |
-| Price (τ/α) | 0.010385 |
-| Age | 922 days |
+| Emission / day | 65.6349 τ |
+| Top-1 share | 41.8% |
+| Liquidity (TAO in) | 26,278.3 τ |
+| Price (τ/α) | 0.008731 |
+| Age | 974 days |
 
 
-## Easy-entry score: 16 / 100  🔴 low
+## Easy-entry score: 26 / 100  🔴 low
 
 - heavy GPU need
-- top1 takes 93% (winner-take-all)
 - subnet is FULL (eviction war)
 - cheap burn fee 0.0005 τ
 
-| Component | Score |
+| Component | Points |
 |---|---|
-| GPU friction | 0.1 / 20 |
-| Decentralization (top-1) | 0.1 / 20 |
-| Active miners | 0.0 / 15 |
-| Free slots | 0.0 / 15 |
-| Burn fee | 1.0 / 15 |
-| Liquidity | 0.1 / 10 |
-| Emission | 0.1 / 5 |
+| GPU friction | 1.1 / 22 |
+| Decentralization (top-1) | 11.6 / 20 |
+| Active miners | 0.3 / 16 |
+| Free slots | 0.0 / 13 |
+| Burn fee | 11.0 / 11 |
+| Liquidity | 1.2 / 10 |
+| Emission | 0.8 / 8 |
 
 ## What is known about this category
 
-Category information is limited. Check the subnet's GitHub and Discord for specifics before investing time or registration fees.
+This subnet produces or evaluates natural-language content. A local LLM (Llama 3.1 8B) is usually sufficient; GPU is helpful for fast inference but not always required.
 
 ## GPU / hardware
 
@@ -50,25 +49,26 @@ Heavy GPU — A100 or H100 class hardware gives the most competitive edge.
 
 ## Reward shape
 
-Reward shape is not yet categorised. Check the subnet's incentive mechanism docs to understand how emissions are distributed.
+**Peaked:** emission concentrates in a handful of miners (top ~5 take >80%). Breaking into that small leading group is essential.
 
 ## Cost to operate a miner
 
 ✅ no paid API keys required · 🖥️ GPU required · ℹ️ baseline estimate (check repo to verify)
 
-**Monthly recurring:** ~$1,500 – $3,500 · **One-time setup:** ~$8,000 – $35,000
+**Monthly recurring:** ~$1,530 – $3,800 · **One-time setup:** ~$8,000 – $35,000
 
 ### Monthly costs
 
 | Item | Required | USD / month | Notes |
 |---|:-:|---|---|
 | GPU rental | ✓ | $1,500 – $3,500 | GPU rental (A100 / H100 80 GB) |
+| LLM API (OpenAI / Anthropic / OpenRouter) | — | $30 – $300 | optional if you run a local model; mandatory on a few (check env.example in the repo) |
 
 ### One-time costs
 
 | Item | Required | USD | Notes |
 |---|:-:|---|---|
-| Registration burn fee (one-time per UID) | ✓ | $0.15 – $0.18 | 0.0005 τ · @ $307.36/τ · includes ~20% buffer for fee jitter |
+| Registration burn fee (one-time per UID) | ✓ | $0.10 – $0.13 | 0.0005 τ · @ $209.12/τ · includes ~20% buffer for fee jitter |
 | GPU purchase (optional alternative to renting) | — | $8,000 – $35,000 | A100 / H100 — usually rented, not bought |
 
 > Estimates are baseline ranges from the subnet's category and GPU need; check the subnet's `env.example` / README for specific API key requirements.

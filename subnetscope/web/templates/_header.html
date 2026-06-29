@@ -1,0 +1,41 @@
+<header class="topbar">
+    <div class="topbar-inner">
+      <h1><a href="/" class="brand-link">subnetscope</a></h1>
+
+      <nav class="nav-tabs">
+        <a href="/" class="{% if active_nav == 'subnets' %}active{% endif %}">Subnets</a>
+        <a href="https://taostats.io/" target="_blank" rel="noopener">Taostats</a>
+      </nav>
+
+      <div class="meta">
+        <span>head <span id="head-block" class="mono">{{ head_block }}</span></span>
+        <span class="sep">·</span>
+        <span>scan <span id="fetched-at" class="mono">{{ fetched_at }}</span></span>
+
+        {% if show_tools %}
+        <div class="bell-wrap">
+          <button id="bell-btn" class="bell-btn" title="Alerts">🔔</button>
+          <span id="alerts-badge" class="bell-badge"></span>
+          <div id="alerts-panel" class="alerts-panel">
+            <header>
+              <h3>Alerts</h3>
+              <span id="alerts-clear" class="clear">mark all seen</span>
+            </header>
+            <div id="alerts-list">
+              <div class="empty">Loading...</div>
+            </div>
+          </div>
+        </div>
+
+        <button id="wallet-btn" class="btn wallet-btn" title="Show TAO balance + stake for a coldkey">
+          Wallet
+        </button>
+
+        <button id="lookup-btn" class="btn lookup-btn" title="Find which subnets a coldkey's or IP's hotkeys are registered on">
+          Find by IP / coldkey
+        </button>
+        <span class="indicator">⟳</span>
+        {% endif %}
+      </div>
+    </div>
+  </header>

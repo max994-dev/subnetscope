@@ -1,6 +1,6 @@
 # Subnet 2 — DSperse
 
-> Auto-analyzed: 2026-05-08 06:05 PDT · easy-entry score: 30.7/100 · refreshes hourly
+> Auto-analyzed: 2026-06-29 21:55 EEST · easy-entry score: 29.4/100 · refreshes hourly
 
 *This analysis is auto-generated from live chain data. It updates every hour.
 For hand-curated notes, check the Bittensor Discord or the subnet's own docs.*
@@ -12,34 +12,31 @@ For hand-curated notes, check the Bittensor Discord or the subnet's own docs.*
 | Category | science |
 | GPU need | medium |
 | Reward shape | winner |
-| Active miners | 88 |
+| Active miners | 8 |
 | UID slots | 256/256 (FULL) |
 | Burn fee | 0.000500 τ `[░░░░░░░░░░░░░░░░░░░░]` 0.0% of max |
 | Burn min / max | 0.000500 τ → 100.0000 τ |
-| Emission / day | 44.5745 τ |
-| Top-1 share | 88.6% |
-| Liquidity (TAO in) | 10,857.6 τ |
-| Price (τ/α) | 0.006191 |
-| Age | 751 days |
+| Emission / day | 42.1274 τ |
+| Top-1 share | 70.6% |
+| Liquidity (TAO in) | 10,230.6 τ |
+| Price (τ/α) | 0.005462 |
+| Age | 803 days |
 
 
-> **Trend (from 57 snapshots):** Active miner count has grown by 43 since the first recorded snapshot.
+## Easy-entry score: 29 / 100  🔴 low
 
-## Easy-entry score: 31 / 100  🔴 low
-
-- top1 takes 89% (winner-take-all)
 - subnet is FULL (eviction war)
 - cheap burn fee 0.0005 τ
 
-| Component | Score |
+| Component | Points |
 |---|---|
-| GPU friction | 0.5 / 20 |
-| Decentralization (top-1) | 0.1 / 20 |
-| Active miners | 0.4 / 15 |
-| Free slots | 0.0 / 15 |
-| Burn fee | 1.0 / 15 |
-| Liquidity | 0.1 / 10 |
-| Emission | 0.0 / 5 |
+| GPU friction | 11.0 / 22 |
+| Decentralization (top-1) | 5.9 / 20 |
+| Active miners | 0.5 / 16 |
+| Free slots | 0.0 / 13 |
+| Burn fee | 11.0 / 11 |
+| Liquidity | 0.5 / 10 |
+| Emission | 0.5 / 8 |
 
 ## What is known about this category
 
@@ -51,7 +48,7 @@ Medium GPU — aim for an RTX 3090 / A10 (10–24 GB VRAM).
 
 ## Reward shape
 
-Reward shape is not yet categorised. Check the subnet's incentive mechanism docs to understand how emissions are distributed.
+**Winner-take-all:** the single best scorer takes most (>50%) of the miner emission. Expect lumpy, high-variance income. You need to be consistently near the top to earn meaningfully.
 
 ## Cost to operate a miner
 
@@ -69,7 +66,7 @@ Reward shape is not yet categorised. Check the subnet's incentive mechanism docs
 
 | Item | Required | USD | Notes |
 |---|:-:|---|---|
-| Registration burn fee (one-time per UID) | ✓ | $0.15 – $0.18 | 0.0005 τ · @ $307.36/τ · includes ~20% buffer for fee jitter |
+| Registration burn fee (one-time per UID) | ✓ | $0.10 – $0.13 | 0.0005 τ · @ $209.12/τ · includes ~20% buffer for fee jitter |
 | GPU purchase (optional alternative to renting) | — | $700 – $2,200 | RTX 4090 / used 3090 — break-even ~6-12 mo |
 
 > Estimates are baseline ranges from the subnet's category and GPU need; check the subnet's `env.example` / README for specific API key requirements.

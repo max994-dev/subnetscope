@@ -18,7 +18,7 @@ universe:
 
 scan:
   # Max parallel SDK reads (each call is a websocket round-trip).
-  concurrency: 8
+  concurrency: 5
   # Time between full refreshes in TUI mode (seconds).
   refresh_seconds: 90
   # If a subnet read fails, retry this many times then move on.
@@ -44,7 +44,10 @@ dashboard:
   #   4. cheapest burn fee first
   #   5. highest liquidity first (more stable AMM pool)
   #   6. highest emission first (more rewards)
-  sort_by: "gpu:asc, reward:asc, slots_free:desc, fee:asc, liquidity:desc, emission:desc"
+  sort_by: "score:desc"
+  # Other examples: "gpu:asc, reward:asc, slots_free:desc, fee:asc, liquidity:desc, emission:desc"
+  # Keys: netuid, score, fee, demand, name, type, gpu, reward, top1, miners, gini,
+  #       emission, liquidity, age, slots_used, slots_free, fullness, price.
   # Default direction for keys without an explicit :asc/:desc suffix above.
   sort_order: "asc"
   # Filter to only these categories (empty = show all).
@@ -77,6 +80,8 @@ coldkeys:
 
 hotkeys:
   # Optional: miner/validator hotkey SS58s to highlight on each SUBNET DETAIL page.
+  # Also used for tempo-near 🔔 alerts: only subnets where at least one of these
+  # hotkeys is registered (has a UID) can emit a tempo-near alert.
   # Shows registration + UID, then emission rank vs miners or validators (paid α/block),
   # pool share %, τ/day, incentive, trust — same basis as the "Miner reward distribution" table.
   # Tip: cat ~/.bittensor/wallets/<wallet>/hotkeys/<hk>/hotkeypub.txt
@@ -85,7 +90,6 @@ hotkeys:
     - name: "hot331"
       ss58: "5DhWWy9sd98tk6nXtA3ev1SWQAh3SeWdkzwmCVkuqgDaf8Wm"
       note: "SN33 miner"
-      entries:
     - name: "hot332"
       ss58: "5DXXvse5v3ivnKcgxLrXUQ5LsxcB9xwyE9yjYN4SoNd9eZME"
       note: "SN33 miner"

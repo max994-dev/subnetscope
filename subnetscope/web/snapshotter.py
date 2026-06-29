@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 
 from ..types import ScanResult
 from . import alerts as alerts_mod
@@ -13,7 +14,13 @@ from .state_db import StateDB
 log = logging.getLogger(__name__)
 
 
-def record_scan(db: StateDB, scan: ScanResult) -> dict:
+def record_scan(
+    db: StateDB,
+    scan: ScanResult,
+    *,
+    sdk_client: Any = None,
+    watch_hotkeys: list | None = None,
+) -> dict:
     """Persist a scan into history and emit any new alerts. Returns a small
     dict of stats so callers can log it."""
     ts = int(scan.fetched_at.timestamp())
@@ -25,7 +32,11 @@ def record_scan(db: StateDB, scan: ScanResult) -> dict:
 
     new_netuids = db.upsert_identity(ts, scan.rows)
     written = db.write_snapshot(ts, block, scan.rows)
-    alert_count = alerts_mod.evaluate(db, scan.rows, block, ts)
+    alert_count = alerts_mod.evaluate(
+        db, scan.rows, block, ts,
+        sdk_client=sdk_client,
+        watch_hotkeys=watch_hotkeys,
+    )
     if not is_first_scan:
         alert_count += alerts_mod.emit_new_subnet_alerts(
             db, new_netuids, scan.rows, ts)

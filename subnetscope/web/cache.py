@@ -8,6 +8,7 @@ the chain hit rate sane.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from datetime import datetime
@@ -21,6 +22,12 @@ from .snapshotter import record_scan
 from .state_db import StateDB
 
 log = logging.getLogger(__name__)
+
+# substrate-interface caches block metadata/runtime info per RPC call inside the
+# long-lived Subtensor objects, so RAM creeps up over hours of scans (~100MB/h
+# observed). We recycle (close + lazily reconnect) the chain connections every
+# RECYCLE_SECONDS to release those caches. Set SSCO_RECYCLE_SECONDS=0 to disable.
+_RECYCLE_SECONDS = int(os.getenv("SSCO_RECYCLE_SECONDS", "3600"))
 
 
 class CachedScanner:
@@ -43,6 +50,10 @@ class CachedScanner:
         self._scores: dict[int, ScoreBreakdown] = {}
         self._refreshing: bool = False
         self._first_scan_done = threading.Event()
+        self._initial_fetch_started: bool = False
+        self._last_recycle: float = time.time()
+        # (phase, done, total) — phase "fetch" during subnet rows, "finalize" post-scan
+        self._scan_progress: tuple[str, int, int] = ("idle", 0, 0)
 
         if state_db_path is None:
             state_db_path = Path(__file__).resolve().parent.parent.parent \
@@ -53,15 +64,34 @@ class CachedScanner:
     def collector(self) -> Collector:
         return self._collector
 
+    def peek(self) -> ScanResult | None:
+        """Return the last scan if any, without blocking or starting I/O."""
+        with self._lock:
+            return self._cached
+
     def _do_scan(self) -> ScanResult:
         """Perform one chain scan + score + history snapshot. Blocking."""
         log.info("Rescanning chain (ttl=%ds)", self.ttl_seconds)
         t0 = time.time()
-        scan = self._collector.scan()
+
+        def _progress(done: int, total: int) -> None:
+            with self._lock:
+                self._scan_progress = ("fetch", done, max(1, total))
+
+        with self._lock:
+            self._scan_progress = ("fetch", 0, 1)
+        scan = self._collector.scan(progress_cb=_progress)
+        with self._lock:
+            self._scan_progress = ("finalize", 1, 2)
         dt = time.time() - t0
         log.info("Scan complete: %d rows in %.1fs", len(scan.rows), dt)
         try:
-            record_scan(self.db, scan)
+            record_scan(
+                self.db,
+                scan,
+                sdk_client=self._collector.sdk,
+                watch_hotkeys=list(self.cfg.hotkeys.entries or []),
+            )
         except Exception:
             log.exception("record_scan failed")
         try:
@@ -69,11 +99,26 @@ class CachedScanner:
         except Exception:
             log.exception("score_all failed")
             scores = {}
+        for r in scan.rows:
+            sb = scores.get(r.netuid)
+            r.easy_entry_score = sb.score if sb else None
         with self._lock:
             self._cached = scan
             self._cached_at = time.time()
             self._scores = scores
+            self._scan_progress = ("idle", 0, 0)
         self._first_scan_done.set()
+        # Periodically recycle chain connections to release substrate-interface's
+        # per-block metadata cache (the source of the slow RAM creep). close() drops
+        # every Subtensor connection; they reconnect lazily on the next scan. Safe
+        # here: the scan is finished + cached and the worker pool is idle.
+        if _RECYCLE_SECONDS > 0 and time.time() - self._last_recycle > _RECYCLE_SECONDS:
+            log.info("Recycling chain connections to release substrate metadata cache")
+            try:
+                self._collector.close()
+            except Exception:
+                log.exception("connection recycle failed")
+            self._last_recycle = time.time()
         return scan
 
     def _refresh_in_background(self) -> None:
@@ -129,6 +174,23 @@ class CachedScanner:
     def scores(self) -> dict[int, ScoreBreakdown]:
         return self._scores
 
+    def scan_progress(self) -> dict[str, int | float | str]:
+        """Rough progress for the *current* blocking scan (cold start / force).
+
+        Stale-while-revalidate background refreshes do not update this.
+        """
+        with self._lock:
+            phase, done, total = self._scan_progress
+        tot = max(1, int(total))
+        d = max(0, min(int(done), tot))
+        if phase == "fetch":
+            pct = min(99, int(100 * d / tot))
+        elif phase == "finalize":
+            pct = min(99, 85 + int(14 * d / tot))
+        else:
+            pct = 100
+        return {"phase": phase, "done": d, "total": tot, "pct": pct}
+
     def cache_age_seconds(self) -> float:
         with self._lock:
             if self._cached_at == 0:
@@ -146,8 +208,12 @@ class CachedScanner:
     def prewarm_async(self) -> None:
         """Kick off a background thread that runs the first scan so the very
         first user request doesn't have to wait the full 60s+ chain scan."""
-        if self._cached is not None:
-            return
+        with self._lock:
+            if self._cached is not None:
+                return
+            if self._initial_fetch_started:
+                return
+            self._initial_fetch_started = True
 
         def _run():
             log.info("prewarm: starting initial scan in background")
@@ -156,9 +222,10 @@ class CachedScanner:
                 log.info("prewarm: initial scan complete")
             except Exception:
                 log.exception("prewarm: scan failed")
+                with self._lock:
+                    self._initial_fetch_started = False
 
-        t = threading.Thread(target=_run, name="prewarm", daemon=True)
-        t.start()
+        threading.Thread(target=_run, name="prewarm", daemon=True).start()
 
     def close(self) -> None:
         try:

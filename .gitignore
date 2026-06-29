@@ -35,3 +35,4 @@ state.db-shm
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+*.bak

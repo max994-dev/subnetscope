@@ -60,17 +60,27 @@ class SubnetRow:
     commit_reveal_enabled: bool | None = None
     weights_rate_limit: int | None = None
 
-    # Live miner reward concentration (computed from metagraph incentives)
-    active_miners: int | None = None       # miners with non-zero incentive
-    top1_share: float | None = None        # share of total incentive captured by top miner
+    # Live miner incentive concentration (non-validator UIDs only; metagraph)
+    active_miners: int | None = None       # miners (no val permit) with incentive > 0
+    top1_share: float | None = None        # top miner's share of total *miner* incentive
     top5_share: float | None = None
     top10_share: float | None = None
     top50_share: float | None = None
     incentive_gini: float | None = None    # 0 = perfectly equal, 1 = winner-take-all
 
+    # Owner / burn economics (from metagraph, owner_hotkey vs all UIDs)
+    incentive_burn: float | None = None        # owner-hotkey share of total incentive (0-1)
+    owner_dividend_share: float | None = None  # owner-hotkey share of total dividends (0-1)
+    owner_emission_share: float | None = None  # owner-hotkey share of post-cut UID emission (0-1)
+    validator_emission_share: float | None = None  # non-owner validators' share (0-1)
+    miner_emission_share: float | None = None  # non-owner miners' share (0-1)
+
     # Derived labels
     gpu_need: str = "?"               # heavy | medium | low | none | varies | ?
     reward_shape: str = "?"           # winner | peak | topN | flat | ?
+
+    # Easy-entry score (0–100); set by web scanner after score_all()
+    easy_entry_score: float | None = None
 
     # Provenance
     name_source: str = "unknown"       # "identity" | "taostats" | "fallback"
@@ -83,3 +93,13 @@ class ScanResult:
     head_block: int
     fetched_at: datetime
     failures: dict[int, str] = field(default_factory=dict)  # netuid -> error msg
+
+    @classmethod
+    def pending(cls) -> ScanResult:
+        """Placeholder while the first chain scan runs in the background."""
+        return cls(
+            rows=[],
+            head_block=0,
+            fetched_at=datetime.now(timezone.utc),
+            failures={},
+        )

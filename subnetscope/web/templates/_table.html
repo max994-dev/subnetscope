@@ -18,23 +18,39 @@
   <span class="badge {{ cls }}">{{ r }}</span>
 {%- endmacro %}
 
-{% macro demand_cell(r) -%}
-  {%- if r.burn_demand is none -%}<span class="vdim">—</span>
+{% macro inc_burn_cell(r) -%}
+  {%- if r.incentive_burn_pct is none -%}<span class="vdim">—</span>
   {%- else -%}
-    {%- set v = r.burn_demand * 100 -%}
-    {%- if v >= 75 -%}<span class="demand-high">{{ "%.0f"|format(v) }}%</span>
-    {%- elif v >= 25 -%}<span class="demand-mid">{{ "%.0f"|format(v) }}%</span>
+    {%- set v = r.incentive_burn_pct -%}
+    {%- if v >= 50 -%}<span class="demand-high">{{ "%.0f"|format(v) }}%</span>
+    {%- elif v >= 15 -%}<span class="demand-mid">{{ "%.0f"|format(v) }}%</span>
     {%- else -%}<span class="demand-low">{{ "%.0f"|format(v) }}%</span>{%- endif -%}
   {%- endif -%}
 {%- endmacro %}
 
-{% macro score_cell(s) -%}
-  {%- if s is none -%}<span class="vdim">—</span>
+{% macro own_div_cell(r) -%}
+  {%- if r.owner_dividend_pct is none -%}<span class="vdim">—</span>
   {%- else -%}
-    <span class="score-bar"><span class="score-fill" style="width:{{ s }}%"></span></span>
-    <span class="score-num mono">{{ "%.0f"|format(s) }}</span>
+    {%- set v = r.owner_dividend_pct -%}
+    {%- if v >= 50 -%}<span class="demand-high">{{ "%.0f"|format(v) }}%</span>
+    {%- elif v >= 15 -%}<span class="demand-mid">{{ "%.0f"|format(v) }}%</span>
+    {%- else -%}<span class="demand-low">{{ "%.0f"|format(v) }}%</span>{%- endif -%}
   {%- endif -%}
 {%- endmacro %}
+
+{% set spk = sort_primary_key|default('') %}
+{% set spo = sort_primary_order|default('desc') %}
+{% set tnb = tempo_near_blocks|default(5) %}
+
+{% macro th_sort(label, sk, cls='', title='') -%}
+<th class="sort-th{% if cls %} {{ cls }}{% endif %}" data-sort-key="{{ sk }}" title="{{ title or 'Click to sort' }}">{{ label }}{% if spk == sk %}<span class="sort-ind">{% if spo == 'asc' %}↑{% else %}↓{% endif %}</span>{% endif %}</th>
+{%- endmacro %}
+
+{% if scan_pending %}
+<div class="scan-pending-banner">
+  Fetching subnet data from the chain (first load often takes 60–120s). This table will refresh automatically.
+</div>
+{% endif %}
 
 <div class="status-line">
   <span>sort: <span class="key">{{ sort_pretty }}</span></span>
@@ -48,31 +64,40 @@
   <table class="subnet-table">
     <thead>
       <tr>
-        <th></th>
-        <th class="right">net</th>
-        <th>name</th>
-        <th>type</th>
-        <th>gpu</th>
-        <th>reward</th>
-        <th class="right">top1%</th>
-        <th class="right">miners</th>
-        <th class="right">burn fee</th>
-        <th class="right">demand</th>
-        <th class="right">used/max</th>
-        <th class="right">τ liq</th>
-        <th class="right">τ/α price</th>
-        <th class="right">emis/d</th>
-        <th class="right">age (d)</th>
-        <th class="right">score</th>
-        <th>description</th>
+        <th class="watch-col" title="Bookmark (saved in this browser only)">☆</th>
+        <th class="center tick-col" title="Checked when the next emission tick is within {{ tnb }} blocks (same rule as tempo-near 🔔 alerts)">{{ tnb }}b</th>
+        {{ th_sort('net', 'netuid', 'right') }}
+        {{ th_sort('name', 'name') }}
+        {{ th_sort('type', 'type') }}
+        {{ th_sort('gpu', 'gpu') }}
+        {{ th_sort('reward', 'reward') }}
+        {{ th_sort('top1%', 'top1', 'right') }}
+        {{ th_sort('inc burn', 'inc_burn', 'right', 'Incentive burn — share of the miner-incentive bucket routed to the owner/burn hotkey instead of real miners. Click to sort.') }}
+        {{ th_sort('own div', 'own_div', 'right', 'Owner dividend share — fraction of validator dividends earned by the owner hotkey. High = the owner runs the dominant validator. Click to sort.') }}
+        {{ th_sort('owner%', 'owner', 'right', 'Effective owner take — 18% protocol cut + the owner hotkey\'s share of post-cut emission (dividends + burned incentive). Click to sort.') }}
+        {{ th_sort('miners', 'miners', 'right') }}
+        {{ th_sort('burn', 'fee', 'right') }}
+        {{ th_sort('used/max', 'fullness', 'right') }}
+        {{ th_sort('τ/α', 'price', 'right') }}
+        {{ th_sort('emis/d', 'emission', 'right') }}
+        {{ th_sort('age', 'age', 'right') }}
       </tr>
     </thead>
     <tbody>
       {% for r in rows %}
-      <tr data-netuid="{{ r.netuid }}">
+      <tr data-netuid="{{ r.netuid }}"{% if r.tempo_near %} class="tr-tempo-near"{% endif %}>
         <td>
           <button class="btn-icon star-btn" data-netuid="{{ r.netuid }}"
-                  title="add to watchlist">☆</button>
+                  title="Bookmark subnet">☆</button>
+        </td>
+        <td class="center tick-col">
+          {%- if not r.tempo or r.tempo <= 0 -%}
+            <span class="vdim">—</span>
+          {%- else -%}
+            <input type="checkbox" class="tempo-tick-cb" disabled
+              {% if r.tempo_near %}checked{% endif %}
+              title="{% if r.tempo_near %}Emission tick in {{ r.tempo_blocks_to_tick }} block{% if r.tempo_blocks_to_tick != 1 %}s{% endif %} (≤{{ tnb }}){% elif r.tempo_blocks_to_tick is not none %}Next tick in {{ r.tempo_blocks_to_tick }} blocks{% else %}—{% endif %}">
+          {%- endif -%}
         </td>
         <td class="netuid right"><a href="/subnet/{{ r.netuid }}">{{ r.netuid }}</a></td>
         <td class="name"><a href="/subnet/{{ r.netuid }}">{{ r.name }}</a></td>
@@ -83,21 +108,20 @@
           {%- if r.top1_share is none -%}<span class="vdim">—</span>
           {%- else -%}{{ "%.1f"|format(r.top1_share*100) }}%{%- endif -%}
         </td>
+        <td class="right">{{ inc_burn_cell(r) }}</td>
+        <td class="right">{{ own_div_cell(r) }}</td>
+        <td class="right mono">
+          {%- if r.owner_pct is not none -%}{{ "%.1f"|format(r.owner_pct) }}%{%- else -%}<span class="vdim">—</span>{%- endif -%}
+        </td>
         <td class="right">
           {%- if r.active_miners is none -%}<span class="vdim">—</span>
           {%- else -%}{{ r.active_miners }}{%- endif -%}
         </td>
         <td class="right {% if r.is_full %}full{% endif %}">{{ fmt_burn(r.burn_tao) }}</td>
-        <td class="right">{{ demand_cell(r) }}</td>
         <td class="right {% if r.is_full %}full{% endif %}">{{ r.subnetwork_n }}/{{ r.max_n }}</td>
-        <td class="right tao">{{ "{:,.0f}".format(r.tao_in) }}</td>
         <td class="right price">{{ "%.5f"|format(r.price) }}</td>
         <td class="right emi">{{ "%.1f"|format(r.emission_per_day) }}</td>
         <td class="right age">{{ "%.0f"|format(r.age_days) }}</td>
-        <td class="right">{{ score_cell(r.score) }}</td>
-        <td class="desc" title="{{ r.description }}">
-          {{ r.description[:80] }}{% if r.description|length > 80 %}…{% endif %}
-        </td>
       </tr>
       {% endfor %}
     </tbody>

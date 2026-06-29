@@ -38,7 +38,15 @@ _imports = _LazyImports()
 def _ensure_imports() -> None:
     if _imports.bt is not None:
         return
-    import bittensor as bt
+    try:
+        import bittensor as bt
+    except ImportError as e:
+        raise ImportError(
+            "subnetscope needs the Python package 'bittensor' (provides Subtensor). "
+            "Install with: pip install 'bittensor>=9' or uv sync in the subnetscope repo. "
+            "Note: bittensor-cli does not install bittensor — use a venv that includes both "
+            "if you run subnetscope alongside miner tooling."
+        ) from e
     _imports.bt = bt
 
 
@@ -58,6 +66,12 @@ class SDKClient:
         self._tls = threading.local()
         self._all_subtensors_lock = threading.Lock()
         self._all_subtensors: list[Any] = []
+        # Persistent worker pool reused across scans. Creating a fresh pool per
+        # scan spawned new threads each time, and each new thread opened a new
+        # per-thread Subtensor that was never closed -> steady RAM growth.
+        # Reusing one pool keeps the per-thread connections bounded.
+        self._pool: Any = None
+        self._pool_workers: int = 0
 
     @property
     def subtensor(self) -> Any:
@@ -82,6 +96,13 @@ class SDKClient:
         return sub
 
     def close(self) -> None:
+        if self._pool is not None:
+            try:
+                self._pool.shutdown(wait=False)
+            except Exception:  # noqa: BLE001
+                pass
+            self._pool = None
+            self._pool_workers = 0
         with self._all_subtensors_lock:
             for sub in self._all_subtensors:
                 try:
@@ -198,17 +219,30 @@ class SDKClient:
         used_n = _safe_subnetwork_n(sub, netuid, info)
         slots_free = max(0, max_n - used_n)
 
-        # Live miner-reward concentration from the metagraph.
+        # Live miner incentive concentration (excludes validator_permit UIDs).
         conc: dict[str, float | int] = {}
+        burn: dict[str, float] = {}
+        owner_hk = _decode_str(getattr(info, "owner_hotkey", None))
         if fetch_metagraph:
-            from ..categorize import incentive_concentration
+            from ..categorize import miner_incentive_concentration
             try:
                 meta = self._retry(sub.metagraph, netuid=netuid, lite=True)
                 # Avoid `arr or []` — numpy arrays raise on bool().
                 incentives_attr = getattr(meta, "incentive", None)
                 if incentives_attr is not None:
                     incentives = [float(x) for x in incentives_attr]
-                    conc = incentive_concentration(incentives)
+                    vp_attr = getattr(meta, "validator_permit", None)
+                    permits: list[bool] | None = None
+                    if vp_attr is not None:
+                        permits = [bool(x) for x in vp_attr]
+                    conc = miner_incentive_concentration(incentives, permits)
+                    # Owner/burn split: how much emission + incentive the
+                    # subnet owner's own hotkey captures vs real miners.
+                    emissions = _to_float_list_attr(getattr(meta, "emission", None))
+                    dividends = _to_float_list_attr(getattr(meta, "dividends", None))
+                    hotkeys = [str(x) for x in (getattr(meta, "hotkeys", None) or [])]
+                    burn = _owner_burn_shares(
+                        emissions, incentives, dividends, permits, hotkeys, owner_hk)
             except Exception as e:  # noqa: BLE001
                 log.warning("metagraph fetch failed for netuid=%s: %s", netuid, e)
                 conc = {}
@@ -257,6 +291,11 @@ class SDKClient:
             top10_share=conc.get("top10_share"),
             top50_share=conc.get("top50_share"),
             incentive_gini=conc.get("gini"),
+            incentive_burn=burn.get("incentive_burn"),
+            owner_dividend_share=burn.get("owner_dividend_share"),
+            owner_emission_share=burn.get("owner_emission_share"),
+            validator_emission_share=burn.get("validator_emission_share"),
+            miner_emission_share=burn.get("miner_emission_share"),
             name_source=name_source,
         )
 
@@ -288,26 +327,103 @@ class SDKClient:
                 fetch_metagraph=fetch_metagraph,
             )
 
-        with ThreadPoolExecutor(max_workers=max_workers,
-                                thread_name_prefix="ssco") as pool:
-            futures = {pool.submit(_worker, n): n for n in netuids}
-            for fut in as_completed(futures):
-                n = futures[fut]
+        # Reuse one persistent pool (and its per-thread Subtensors) across
+        # scans instead of creating/destroying one each time, which leaked a
+        # fresh set of websocket connections per scan.
+        if self._pool is None or self._pool_workers != max_workers:
+            if self._pool is not None:
+                self._pool.shutdown(wait=False)
+            self._pool = ThreadPoolExecutor(
+                max_workers=max_workers, thread_name_prefix="ssco")
+            self._pool_workers = max_workers
+        pool = self._pool
+        futures = {pool.submit(_worker, n): n for n in netuids}
+        for fut in as_completed(futures):
+            n = futures[fut]
+            try:
+                rows.append(fut.result())
+            except Exception as e:  # noqa: BLE001
+                failures[n] = f"{type(e).__name__}: {e}"
+            done += 1
+            if progress_cb is not None:
                 try:
-                    rows.append(fut.result())
-                except Exception as e:  # noqa: BLE001
-                    failures[n] = f"{type(e).__name__}: {e}"
-                done += 1
-                if progress_cb is not None:
-                    try:
-                        progress_cb(done, total)
-                    except Exception:  # noqa: BLE001
-                        pass
+                    progress_cb(done, total)
+                except Exception:  # noqa: BLE001
+                    pass
         rows.sort(key=lambda r: r.netuid)
         return rows, failures
 
 
 # ---------------------------------------------------------------------- helpers
+
+
+def _to_float_list_attr(x: Any) -> list[float]:
+    """Normalise a metagraph numeric vector (Balance/float) to plain floats."""
+    if x is None:
+        return []
+    out: list[float] = []
+    for v in x:
+        tao_attr = getattr(v, "tao", None)
+        try:
+            out.append(float(tao_attr) if tao_attr is not None else float(v))
+        except Exception:  # noqa: BLE001
+            out.append(0.0)
+    return out
+
+
+def _owner_burn_shares(
+    emissions: list[float],
+    incentives: list[float],
+    dividends: list[float],
+    permits: list[bool] | None,
+    hotkeys: list[str],
+    owner_hk: str | None,
+) -> dict[str, float]:
+    """Share of emission/incentive/dividends captured by the subnet owner's hotkey.
+
+    ``incentive_burn`` is the owner-hotkey share of the *incentive* vector —
+    how much of the miner-reward bucket validators route back to the owner
+    (the "burn") instead of to real, competing miners. ``owner_dividend_share``
+    is the owner-hotkey share of the *dividend* vector — i.e. whether the owner
+    runs a productive validator. The emission shares partition the post-owner-cut
+    UID pool into owner / non-owner validators / non-owner miners so the detail
+    page can show a true split.
+    """
+    n = len(emissions)
+    if n == 0 or not owner_hk:
+        return {}
+    perm = list(permits or [])
+    if len(perm) < n:
+        perm.extend([False] * (n - len(perm)))
+    hk = list(hotkeys or [])
+    if len(hk) < n:
+        hk.extend([""] * (n - len(hk)))
+
+    is_owner = [hk[i] == owner_hk for i in range(n)]
+    tot_emi = sum(emissions) or 0.0
+    out: dict[str, float] = {}
+    if tot_emi > 0:
+        owner_emi = sum(emissions[i] for i in range(n) if is_owner[i])
+        val_emi = sum(emissions[i] for i in range(n)
+                      if perm[i] and not is_owner[i])
+        miner_emi = sum(emissions[i] for i in range(n)
+                        if not perm[i] and not is_owner[i])
+        out["owner_emission_share"] = owner_emi / tot_emi
+        out["validator_emission_share"] = val_emi / tot_emi
+        out["miner_emission_share"] = miner_emi / tot_emi
+
+    tot_inc = sum(incentives) or 0.0
+    if tot_inc > 0:
+        owner_inc = sum(incentives[i] for i in range(min(n, len(incentives)))
+                        if is_owner[i])
+        out["incentive_burn"] = owner_inc / tot_inc
+
+    tot_div = sum(dividends) or 0.0
+    if tot_div > 0:
+        owner_div = sum(dividends[i] for i in range(min(n, len(dividends)))
+                        if is_owner[i])
+        out["owner_dividend_share"] = owner_div / tot_div
+    return out
 
 
 def _decode_str(x: Any) -> str | None:

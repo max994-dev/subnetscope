@@ -375,7 +375,7 @@ def cmd_export(config_path: str, fmt: str, out_dir: str, sort_by: str | None,
                    "use 127.0.0.1 to lock to localhost only.")
 @click.option("--port", type=int, default=8765, show_default=True,
               help="Port to listen on.")
-@click.option("--ttl", "cache_ttl", type=int, default=120, show_default=True,
+@click.option("--ttl", "cache_ttl", type=int, default=300, show_default=True,
               help="Seconds before a chain rescan kicks off in the "
                    "background. Pages always serve cached data instantly.")
 @click.option("--state-db", "state_db_path", default=None,
@@ -400,6 +400,8 @@ def cmd_web(config_path: str, host: str, port: int, cache_ttl: int,
     from .web.coldkey import init_coldkey_service
     from .web.emission_split import init_emission_split
     from .web.miner_rewards import init_miner_rewards
+    from .web.network_index import init_network_index
+    from .web.readme import init_readme
     from .web.tao_price import init_tao_price
 
     scanner = init_scanner(cfg, ttl_seconds=cache_ttl,
@@ -436,7 +438,16 @@ def cmd_web(config_path: str, host: str, port: int, cache_ttl: int,
     # Per-subnet miner reward ranking (lazy: only fetched on detail page
     # view). 5-min TTL per subnet — way shorter than tempo so we always see
     # the latest paid distribution.
-    init_miner_rewards(sdk_client=_sdk_client)
+    _mr_svc = init_miner_rewards(sdk_client=_sdk_client)
+
+    # Cross-subnet account index (dashboard IP/coldkey lookup) + miner
+    # rank-hold history recorder. Sweeps every subnet's metagraph on a timer,
+    # builds the IP/coldkey -> registrations index, and records the top-K
+    # leaders per subnet so the detail page can show real rank persistence.
+    init_network_index(_sdk_client, _mr_svc, scanner.db, start=not no_prewarm)
+
+    # GitHub README fetch+render cache for the detail page's Readme tab.
+    init_readme()
 
     app = create_app()
 
@@ -529,9 +540,9 @@ def cmd_web(config_path: str, host: str, port: int, cache_ttl: int,
 
     console.print(Panel(
         f"[bold cyan]subnetscope web[/bold cyan]\n"
-        f"  local     [link={base}]{base}[/link]  (recommendations — default)\n"
+        f"  local     [link={base}]{base}[/link]  (unified subnet table — default)\n"
         f"{extra_urls}"
-        f"  table     [link={base}/dashboard]{base}/dashboard[/link]\n"
+        f"  table     [link={base}/dashboard]{base}/dashboard[/link]  (alias)\n"
         f"  {bind_note}\n"
         f"  cache     {cache_ttl}s TTL (stale-while-revalidate)\n"
         f"  state db  {db_display}\n"

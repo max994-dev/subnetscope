@@ -8,10 +8,12 @@ For one subnet we fetch the metagraph, drop validator UIDs (anyone with a
 validator permit), sort the rest by per-block alpha emission descending, and
 return:
 
-  * `miners` — ranked list, each entry has uid, hotkey, incentive, share of
-    miner-bucket (0-1), alpha/day, τ/day (alpha × current pool price).
+  * `miners` — ranked list, each entry has uid, hotkey, incentive, emission
+    rank (`rank_pos`), share of miner-bucket (0-100%), α/day, τ/day, and when
+    subnet tempo is known: **α/tempo** and **τ/tempo** (paid α/block × tempo
+    blocks per epoch × pool price).
   * `summary` — totals (active miners, miner-bucket total τ/day) plus the
-    cumulative share captured by the top {1,5,10,50} miners.
+    cumulative share captured by the top {1,5,10,50} miners and ``tempo_blocks``.
 
 Caching: per-netuid in-memory snapshot, default 5 min TTL (~25 blocks at
 12 s, much shorter than tempo for any subnet). Coalesces concurrent
@@ -23,8 +25,13 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections import Counter
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
+
+# A coldkey or IP shared by more than this many miners flags a sybil-ish cluster.
+SYBIL_THRESHOLD = 3
 
 log = logging.getLogger(__name__)
 
@@ -36,6 +43,7 @@ LOOKUP_TIMEOUT_S = 8.0
 # JSON API path: longer, since clients are likely to wait for fresh data.
 LOOKUP_TIMEOUT_API_S = 45.0
 BLOCKS_PER_DAY = 7200
+BLOCK_SECONDS = 12.0
 DEFAULT_TOP_LIMIT = 30
 
 
@@ -45,6 +53,7 @@ DEFAULT_TOP_LIMIT = 30
 @dataclass
 class _Snapshot:
     netuid: int = 0
+    owner: dict[str, Any] | None = None
     miners: list[dict[str, Any]] = field(default_factory=list)
     validators: list[dict[str, Any]] = field(default_factory=list)
     total_miner_uids: int = 0          # miners (validator_permit=False)
@@ -62,6 +71,9 @@ class _Snapshot:
     top50_pct: float = 0.0
     fetched_at: float = 0.0
     error: str | None = None
+    tempo_blocks: int = 0  # subnet epoch length; scales paid α/block → α per tempo
+    ref_block: int = 0     # chain block the metagraph was synced at
+    churn: dict[str, Any] | None = None  # registration/deregistration turnover
 
 
 # ─── service ────────────────────────────────────────────────────────────────
@@ -114,6 +126,21 @@ class MinerRewardsService:
         coldkeys    = _to_str_list(getattr(meta, "coldkeys", None))
         ranks       = _to_float_list(getattr(meta, "rank", None))
         trusts      = _to_float_list(getattr(meta, "trust", None))
+        reg_blocks  = _to_int_list(getattr(meta, "block_at_registration", None))
+        axons       = getattr(meta, "axons", None) or []
+
+        # Block the metagraph was synced at — reference for tenure / churn.
+        try:
+            ref_block = int(getattr(meta, "block"))
+        except Exception:  # noqa: BLE001
+            ref_block = self._head_block()
+
+        def _ip(uid: int) -> str:
+            try:
+                ip = str(axons[uid].ip)
+                return "" if ip in ("0.0.0.0", "") else ip
+            except Exception:  # noqa: BLE001
+                return ""
 
         n = max(len(emissions), len(incentives), len(permits), len(hotkeys))
         if n == 0:
@@ -121,6 +148,13 @@ class MinerRewardsService:
                              error="empty metagraph")
 
         price = self._subnet_price(netuid)
+        tempo = self._subnet_tempo(netuid)
+        # IMPORTANT: metagraph `.emission` is denominated PER TEMPO (per epoch),
+        # NOT per block — sum(emission)/tempo ≈ (1 - owner_cut) for every subnet.
+        # Convert to a per-block rate with the subnet's tempo so α/day and τ/day
+        # are real. Fall back to 360 (the common tempo) if the directory scan
+        # hasn't recorded one for this subnet yet.
+        eff_tempo = tempo if tempo and tempo > 0 else 360
 
         miners_raw: list[dict[str, Any]] = []
         validators_raw: list[dict[str, Any]] = []
@@ -132,18 +166,24 @@ class MinerRewardsService:
             ck    = str(_at(coldkeys, uid, "") or "")
             rk    = float(_at(ranks, uid, 0.0))
             tr    = float(_at(trusts, uid, 0.0))
+            rb    = int(_at(reg_blocks, uid, 0))
+            tenure_days = (max(0, ref_block - rb) * BLOCK_SECONDS / 86400.0
+                           if rb > 0 and ref_block > 0 else None)
             row: dict[str, Any] = {
                 "uid": uid,
                 "hotkey": hk,
                 "hotkey_short": _short(hk),
                 "coldkey": ck,
                 "coldkey_short": _short(ck),
+                "ip": _ip(uid),
                 "incentive": inc,
                 "rank": rk,
                 "trust": tr,
-                "alpha_per_block": emi,
-                "alpha_per_day": emi * BLOCKS_PER_DAY,
-                "tao_per_day": emi * BLOCKS_PER_DAY * price,
+                "reg_block": rb,
+                "tenure_days": tenure_days,
+                "alpha_per_block": emi / eff_tempo,
+                "alpha_per_day": emi / eff_tempo * BLOCKS_PER_DAY,
+                "tao_per_day": emi / eff_tempo * BLOCKS_PER_DAY * price,
             }
             if is_val:
                 validators_raw.append(row)
@@ -158,7 +198,7 @@ class MinerRewardsService:
         total_tao_per_day     = total_alpha_per_day * price
         active = sum(1 for m in miners_raw if m["alpha_per_block"] > 0)
 
-        # Compute share-of-miner-pool + assign rank.
+        # Compute share-of-miner-pool + assign emission rank + per-tempo rewards.
         for idx, m in enumerate(miners_raw, start=1):
             m["rank_pos"] = idx
             m["share_of_miners"] = (
@@ -166,6 +206,13 @@ class MinerRewardsService:
                 if total_alpha_per_block > 0 else 0.0
             )
             m["share_pct"] = m["share_of_miners"] * 100.0
+            if tempo > 0:
+                apt = m["alpha_per_block"] * float(tempo)
+                m["alpha_per_tempo"] = apt
+                m["tao_per_tempo"] = apt * price
+            else:
+                m["alpha_per_tempo"] = None
+                m["tao_per_tempo"] = None
 
         total_val_alpha = sum(v["alpha_per_block"] for v in validators_raw)
         active_val = sum(1 for v in validators_raw if v["alpha_per_block"] > 0)
@@ -176,9 +223,57 @@ class MinerRewardsService:
                 if total_val_alpha > 0 else 0.0
             )
             v["share_pct"] = v["share_of_validators"] * 100.0
+            if tempo > 0:
+                apt = v["alpha_per_block"] * float(tempo)
+                v["alpha_per_tempo"] = apt
+                v["tao_per_tempo"] = apt * price
+            else:
+                v["alpha_per_tempo"] = None
+                v["tao_per_tempo"] = None
+
+        # Flag clustering: rows whose coldkey or (non-empty) IP is shared by
+        # more than SYBIL_THRESHOLD miners. Counted across ALL miners so a
+        # cluster is detected even if some members fall below the display cutoff.
+        ck_counts = Counter(m["coldkey"] for m in miners_raw if m.get("coldkey"))
+        ip_counts = Counter(m["ip"] for m in miners_raw if m.get("ip"))
+        for m in miners_raw:
+            m["coldkey_count"] = ck_counts.get(m["coldkey"], 0)
+            m["ip_count"] = ip_counts.get(m["ip"], 0) if m.get("ip") else 0
+            m["sybil"] = (m["coldkey_count"] > SYBIL_THRESHOLD
+                          or m["ip_count"] > SYBIL_THRESHOLD)
+
+        # Build the subnet-owner row (shown on top of the table).
+        owner: dict[str, Any] | None = None
+        try:
+            sinfo = sub.subnet(netuid)
+            owner_hk = str(getattr(sinfo, "owner_hotkey", "") or "")
+            owner_ck = str(getattr(sinfo, "owner_coldkey", "") or "")
+            if owner_hk and owner_hk in hotkeys:
+                ou = hotkeys.index(owner_hk)
+                emi = float(_at(emissions, ou, 0.0))
+                ck = str(_at(coldkeys, ou, "") or "") or owner_ck
+                owner = {
+                    "uid": ou,
+                    "hotkey": owner_hk,
+                    "hotkey_short": _short(owner_hk),
+                    "coldkey": ck,
+                    "coldkey_short": _short(ck),
+                    "ip": _ip(ou),
+                    "incentive": float(_at(incentives, ou, 0.0)),
+                    "validator_permit": bool(_at(permits, ou, False)),
+                    "alpha_per_block": emi / eff_tempo,
+                    "tao_per_day": emi / eff_tempo * BLOCKS_PER_DAY * price,
+                    "tao_per_tempo": (emi / eff_tempo * float(tempo) * price)
+                                     if tempo > 0 else None,
+                }
+        except Exception as e:  # noqa: BLE001
+            log.debug("miner_rewards sn%d: owner lookup failed: %s", netuid, e)
+
+        churn = self._compute_churn(netuid, reg_blocks, ref_block)
 
         return _Snapshot(
             netuid=netuid,
+            owner=owner,
             miners=miners_raw,
             validators=validators_raw,
             total_miner_uids=len(miners_raw),
@@ -196,7 +291,84 @@ class MinerRewardsService:
             top50_pct=_cum_pct(miners_raw, 50),
             fetched_at=time.time(),
             error=None,
+            tempo_blocks=int(tempo),
+            ref_block=ref_block,
+            churn=churn,
         )
+
+    def _head_block(self) -> int:
+        try:
+            from .cache import get_scanner
+            return int(get_scanner().get().head_block or 0)
+        except Exception:  # noqa: BLE001
+            return 0
+
+    def _subnet_row(self, netuid: int):
+        """Return the cached directory row for ``netuid`` (or None)."""
+        try:
+            from .cache import get_scanner
+            scan = get_scanner().get()
+        except Exception:  # noqa: BLE001
+            return None
+        for r in scan.rows:
+            if int(r.netuid) == int(netuid):
+                return r
+        return None
+
+    def _compute_churn(
+        self, netuid: int, reg_blocks: list[int], ref_block: int,
+    ) -> dict[str, Any] | None:
+        """Registration / deregistration turnover from on-chain registration blocks.
+
+        ``block_at_registration`` is the exact block each *currently* registered
+        UID registered at. The count of UIDs registered within a window is real
+        on-chain data — and on a *full* subnet each registration evicts an
+        existing UID, so registrations-in-window == deregistrations-in-window.
+        """
+        regs = [int(b) for b in reg_blocks if int(b) > 0]
+        if not regs or ref_block <= 0:
+            return None
+
+        def _within(blocks: int) -> int:
+            cut = ref_block - blocks
+            return sum(1 for b in regs if b >= cut)
+
+        reg_24h = _within(BLOCKS_PER_DAY)
+        reg_7d = _within(BLOCKS_PER_DAY * 7)
+        reg_30d = _within(BLOCKS_PER_DAY * 30)
+
+        tenures_s = sorted(max(0, ref_block - b) * BLOCK_SECONDS for b in regs)
+        total = len(tenures_s)
+        median_s = tenures_s[total // 2]
+        oldest_s = tenures_s[-1]
+        newest_s = tenures_s[0]
+
+        row = self._subnet_row(netuid)
+        subnetwork_n = int(getattr(row, "subnetwork_n", 0) or 0) if row else total
+        max_n = int(getattr(row, "max_n", 0) or 0) if row else 0
+        slots_free = max(0, max_n - subnetwork_n) if max_n else 0
+        is_full = max_n > 0 and subnetwork_n >= max_n
+        immunity = getattr(row, "immunity_period", None) if row else None
+
+        return {
+            "ref_block": ref_block,
+            "total_uids": total,
+            "is_full": bool(is_full),
+            "slots_free": slots_free,
+            "reg_24h": reg_24h,
+            "reg_7d": reg_7d,
+            "reg_30d": reg_30d,
+            "reg_per_day": reg_7d / 7.0,
+            "turnover_pct_30d": (reg_30d / total * 100.0) if total else 0.0,
+            "median_tenure_days": median_s / 86400.0,
+            "median_tenure_label": _dur_label(median_s),
+            "oldest_label": _dur_label(oldest_s),
+            "newest_label": _dur_label(newest_s) + " ago",
+            "halflife_label": _dur_label(median_s),
+            "immunity_label": (
+                f"{int(immunity)} blocks (~{_dur_label(int(immunity) * BLOCK_SECONDS)})"
+                if immunity else None),
+        }
 
     def _subnet_price(self, netuid: int) -> float:
         try:
@@ -208,6 +380,23 @@ class MinerRewardsService:
             if int(r.netuid) == int(netuid):
                 return float(r.price_tao_per_alpha or 0.0)
         return 0.0
+
+    def _subnet_tempo(self, netuid: int) -> int:
+        """Subnet emission tempo (blocks per epoch) from the last directory scan."""
+        try:
+            from .cache import get_scanner
+            scan = get_scanner().get()
+        except Exception:  # noqa: BLE001
+            return 0
+        for r in scan.rows:
+            if int(r.netuid) == int(netuid):
+                t = getattr(r, "tempo", None)
+                try:
+                    ti = int(t) if t is not None else 0
+                except (TypeError, ValueError):
+                    ti = 0
+                return ti if ti > 0 else 0
+        return 0
 
     # ----------------------------------------------------------------- public
 
@@ -302,6 +491,7 @@ class MinerRewardsService:
         force: bool = False,
         limit: int = DEFAULT_TOP_LIMIT,
         timeout_s: float | None = None,
+        highlight_hotkeys: set[str] | None = None,
     ) -> dict[str, Any]:
         """Return a fresh-ish ranked-miner snapshot for `netuid`.
 
@@ -323,7 +513,16 @@ class MinerRewardsService:
             return _result(_Snapshot(netuid=netuid, fetched_at=time.time(),
                                      error="loading"), limit)
         return _result(snap, limit, stale=force or
-                       (time.time() - snap.fetched_at) >= self.ttl)
+                       (time.time() - snap.fetched_at) >= self.ttl,
+                       highlight_hotkeys=highlight_hotkeys)
+
+    def fetch_snapshot_raw(self, netuid: int) -> _Snapshot:
+        """Fetch a fresh processed snapshot synchronously on the *calling*
+        thread (reusing that thread's subtensor). Used by the network sweep,
+        which manages its own bounded, thread-reusing pool — so it must NOT go
+        through ``_bg_refresh`` (which spawns a fresh thread + leaks a
+        per-thread websocket each call)."""
+        return self._fetch_from_chain(int(netuid))
 
     def _bg_refresh(self, netuid: int) -> None:
         ev: threading.Event | None = None
@@ -385,6 +584,28 @@ def _to_str_list(x) -> list[str]:
     return [str(v) if v is not None else "" for v in x]
 
 
+def _to_int_list(x) -> list[int]:
+    if x is None:
+        return []
+    out: list[int] = []
+    for v in x:
+        try:
+            out.append(int(v))
+        except Exception:  # noqa: BLE001
+            out.append(0)
+    return out
+
+
+def _dur_label(seconds: float) -> str:
+    """Human-friendly duration: '12 min', '7.3 h', '4.1 d'."""
+    s = max(0.0, float(seconds))
+    if s < 90 * 60:
+        return f"{int(round(s / 60))} min"
+    if s < 48 * 3600:
+        return f"{s / 3600.0:.1f} h"
+    return f"{s / 86400.0:.1f} d"
+
+
 def _short(ss58: str) -> str:
     s = (ss58 or "").strip()
     return f"{s[:6]}…{s[-4:]}" if len(s) > 12 else s
@@ -401,10 +622,27 @@ def _cum_pct(miners: list[dict[str, Any]], n: int) -> float:
     return (head / total) * 100.0
 
 
-def _result(snap: _Snapshot, limit: int, stale: bool = False) -> dict[str, Any]:
-    miners = snap.miners[: max(0, int(limit))] if snap.miners else []
+def _result(snap: _Snapshot, limit: int, stale: bool = False,
+            highlight_hotkeys: set[str] | None = None) -> dict[str, Any]:
+    mine = {h for h in (highlight_hotkeys or ()) if h}
+    full = snap.miners or []
+    lim = max(0, int(limit))
+    miners = [dict(m) for m in full[:lim]]
+    for m in miners:
+        m["is_mine"] = m.get("hotkey") in mine
+    # Always include the configured ("my") hotkeys: if one ranks below the
+    # display cutoff, append its row at the bottom so it's still visible.
+    if mine:
+        shown = {int(m["uid"]) for m in miners}
+        for m in full[lim:]:
+            if m.get("hotkey") in mine and int(m["uid"]) not in shown:
+                row = dict(m)
+                row["is_mine"] = True
+                row["below_cutoff"] = True
+                miners.append(row)
     return {
         "netuid": snap.netuid,
+        "owner": snap.owner,
         "miners": miners,
         "miners_returned": len(miners),
         "summary": {
@@ -419,8 +657,15 @@ def _result(snap: _Snapshot, limit: int, stale: bool = False) -> dict[str, Any]:
             "top5_pct": snap.top5_pct,
             "top10_pct": snap.top10_pct,
             "top50_pct": snap.top50_pct,
+            "tempo_blocks": int(getattr(snap, "tempo_blocks", 0) or 0),
         },
+        "ref_block": int(getattr(snap, "ref_block", 0) or 0),
+        "churn": getattr(snap, "churn", None),
         "fetched_at": snap.fetched_at,
+        "fetched_at_iso": (
+            datetime.fromtimestamp(snap.fetched_at, tz=timezone.utc)
+            .astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+            if snap.fetched_at else None),
         "age_seconds": max(0.0, time.time() - snap.fetched_at)
                        if snap.fetched_at else None,
         "stale": stale,
